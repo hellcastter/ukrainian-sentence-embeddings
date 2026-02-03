@@ -24,8 +24,9 @@ venv/
 # temporary files
 tmp/
 
-# others
+# loggers
 .neptune/
+wandb/
 
 # keep some files
 !.gitignore

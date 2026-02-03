@@ -1,0 +1,32 @@
+# python files
+__pycache__/
+
+# IDEs
+.vscode/
+
+# project folders with big files
+data/*
+models/*
+datasets_pre_defined/*
+
+# datasets
+*.txt
+*.csv
+*.json
+*.jsonl
+*.bz2
+*.bzip2
+
+# environments
+venv/
+.env
+
+# temporary files
+tmp/
+
+# others
+.neptune/
+
+# keep some files
+!.gitignore
+!.gitkeep

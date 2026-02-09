@@ -8,30 +8,39 @@ from services.utils_results import results_reports
 from services.utils_data import read_and_transform_data
 from services.word_sense_detector import WordSenseDetector
 from services.prediction_strategies import PredictionStrategy
+from services.config import PATH_TO_SOURCE_UDPIPE, SUM_14_PATH
+from services.utils_results import prediction_accuracy
+
 
 from transformers import AutoTokenizer, AutoModel
 
-SUM_14_FINAL_PATH = "datasets_pre_defined/sum_12_fixed.jsonlines"
-
 MODEL_TOKENIZER_PATH = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 # MODEL_TOKENIZER_PATH = "intfloat/multilingual-e5-large"
-MODEL_PATH = "models/fine-tuned-models/model_-166_0"
+MODEL_PATH = "models/fine-tuned-models/model_p23szux0_1"
 # MODEL_PATH="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-UDPipeModel_PATH = "models/20180506.uk.mova-institute.udpipe"
 
 DEVICE = "cuda"  # or "cpu"
 
-if __name__ == "__main__":
+
+def evaluate_wsd(
+    model_path: str,
+    model_tokenizer_path: str | None = None,
+    verbose: bool = True,
+    sum_path: str = SUM_14_PATH
+):
+    if model_tokenizer_path is None:
+        model_tokenizer_path = model_path
+    
     print("Loading evaluation dataset...")
-    data = read_and_transform_data(SUM_14_FINAL_PATH, homonym=True)
+    data = read_and_transform_data(sum_path, homonym=True)
 
     print("Loading fine-tuned model...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_TOKENIZER_PATH)
-    model = AutoModel.from_pretrained(MODEL_PATH, output_hidden_states=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_tokenizer_path)
+    model = AutoModel.from_pretrained(model_path, output_hidden_states=True)
     model = model.to(DEVICE).eval()
 
     print("Loading UDPipe model...")
-    udpipe_model = UDPipeModel(UDPipeModel_PATH)
+    udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
 
     print("Running Word Sense Detection...")
     word_sense_detector = WordSenseDetector(
@@ -44,7 +53,18 @@ if __name__ == "__main__":
     )
     evaluation_dataset_pd = word_sense_detector.run()
 
-    results_reports(evaluation_dataset_pd, udpipe_model)
+    if verbose:
+        results_reports(evaluation_dataset_pd, udpipe_model)
+        
+    return prediction_accuracy(evaluation_dataset_pd) 
+
+
+if __name__ == "__main__":
+    evaluate_wsd(
+        MODEL_PATH,
+        MODEL_TOKENIZER_PATH,
+        verbose=True
+    )
 
 
 # original model 0.701503

@@ -5,17 +5,29 @@ import torch.nn.functional as F
 
 class TripletLoss(nn.Module):
     def __init__(
-        self, model, margin=1.0, p=2, pool_targets=False, use_both_poolings=False
+        self, model, margin=1.0, p=2, pool_targets=False, use_both_poolings=False,
+        loss_type="triplet_loss",
+        dynamic=False,
     ):
         super(TripletLoss, self).__init__()
         self.model = model
         self.margin = margin
         self.p = p
         self.pool_targets = pool_targets
-        # self.loss_fn = nn.TripletMarginLoss(margin=self.margin, p=self.p)
-        self.loss_fn = nn.TripletMarginWithDistanceLoss(
-            margin=self.margin, distance_function=self._cosine_distance,
-        )
+        self.loss_fn = None
+        self.loss_type = loss_type
+        self.dynamic = dynamic
+        
+        if self.loss_type == "triplet_loss":
+            self.loss_fn = nn.TripletMarginLoss(margin=self.margin, p=self.p)
+        elif self.loss_type == "triplet_loss_cosine":
+            self.loss_fn = nn.TripletMarginWithDistanceLoss(
+                margin=self.margin, 
+                distance_function=self._cosine_distance,
+            )
+        else:
+            raise Exception(f"{self.loss_type} loss is not supported")
+            
         self.use_both_poolings = use_both_poolings
 
         if isinstance(self.model, nn.DataParallel):
@@ -70,6 +82,13 @@ class TripletLoss(nn.Module):
 
         # pooled, _ = masked_embeds.max(dim=1)
         # return pooled
+        
+    @property
+    def distance(self):
+        if self.loss_type == "triplet_loss":
+            return torch.cdist
+        elif self.loss_type == "triplet_loss_cosine":
+            return self._cosine_distance
 
     def forward(self, batch):
         batch = {
@@ -105,6 +124,10 @@ class TripletLoss(nn.Module):
                 batch.get("negative_target_word_ids"),
                 pool_targets=self.pool_targets,
             )
+            
+            # swap a and p if positive is closer to negative than anchor
+            if self.dynamic and self.distance(a, n) > self.distance(p, n):
+                a, p = p, n
 
             return self.loss_fn(a, p, n)
 

@@ -3,40 +3,41 @@ Run: python3 -m services.trainer.trainer
 """
 
 import os
+import random
+from ast import literal_eval
 from datetime import datetime
 
-import pandas as pd
-from ast import literal_eval
-import torch
 import numpy as np
-import random
+import pandas as pd
 
-from transformers import AutoTokenizer, AutoModel
-from transformers.optimization import get_linear_schedule_with_warmup
+import torch
 import torch.nn as nn
 from torch.amp import GradScaler, autocast
 
+from transformers import AutoTokenizer, AutoModel
+from transformers.optimization import get_linear_schedule_with_warmup
+
 import wandb
 from tqdm.auto import tqdm
-import configparser
 
-from services.trainer.reinit_model_weights import ModelWithRandomizingSomeWeights
-from services.trainer.datasets import TripletDataset, NTXentDataset, PairsDataset
+from services.trainer.data_factory import DataFactory
+from services.trainer.training_config import TrainingConfig
+
+# from services.trainer.reinit_model_weights import ModelWithRandomizingSomeWeights
 from services.udpipe_model import UDPipeModel
 from services.word_sense_detector import WordSenseDetector
 from services.utils_results import prediction_accuracy
 from services.poolings import PoolingStrategy
 from services.prediction_strategies import PredictionStrategy
-from services.trainer.utlis import report_gpu
-from services.trainer.utlis import AverageMeter
+from services.trainer.utlis import report_gpu, AverageMeter
 from services.trainer.losses import TripletLoss, NTXentLoss, MNRLoss
+from services.config import PATH_TO_SOURCE_UDPIPE
+from eval.eval_wsd import evaluate_wsd
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
 import warnings
-
 # warnings.simplefilter('ignore')
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -76,73 +77,60 @@ class ContrastiveModel(nn.Module):
 
 # TODO: add logging to the class Trainer
 class Trainer:
-    def __init__(self, config: configparser.ConfigParser):
+    def __init__(self, config: str):
         # TODO: i think that a lot of the following code should be move to separate file
-        self.config = config
+        self.config = TrainingConfig.from_config(config)
 
-        self.device = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        )
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.use_amp = self.device.type == "cuda"
         self.scaler = GradScaler(device=self.device.type, enabled=self.use_amp)
 
         self.global_step = 0  # used for wandb logging steps
         self._init_logger()
 
-        if not os.path.isdir(
-            self.config["MODEL_TUNING"]["path_to_save_fine_tuned_model"]
-        ):
-            os.mkdir(self.config["MODEL_TUNING"]["path_to_save_fine_tuned_model"])
+        if not os.path.isdir(self.config.path_to_save_fine_tuned_model):
+            os.mkdir(self.config.path_to_save_fine_tuned_model)
 
         self._init_model()
 
         self._init_loss()
-        self._init_datasets_and_loaders()
+        self._setup_data()
 
         self.train_avg_meter = AverageMeter("train_loss")
         self.max_wsd_acc = 0
         self.rounds_count = 0
 
-        # TODO: i'd like to have better config parsing. It takes too much space
-        self.optim = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=self.config.getfloat("MODEL_TUNING", "learning_rate"),
+        self._setup_optimizer()
+
+    def _setup_optimizer(self):
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(), 
+            lr=self.config.learning_rate, 
+            weight_decay=0.01
         )
 
-        if self.apply_warmup:
-            total_steps = len(self.train_loader) * self.config.getint(
-                "MODEL_TUNING", "num_epochs"
-            )
-            warmup_ratio = self.config.getfloat(
-                "MODEL_TUNING", "warmup_ratio", fallback=None
-            )
-            if warmup_ratio is None:
-                warmup_ratio = self.config.getfloat(
-                    "MODEL_TUNING", "warmup_ratio", fallback=0.0
-                )
-            warmup_steps = min(int(warmup_ratio * total_steps), total_steps)
+        # Warmup logic: needs the total number of training steps
+        if self.config.warmup_ratio > 0:
+            total_steps = len(self.train_loader) * self.config.num_epochs
+            warmup_steps = int(total_steps * self.config.warmup_ratio)
+
             self.scheduler = get_linear_schedule_with_warmup(
-                self.optim,
+                self.optimizer,
                 num_warmup_steps=warmup_steps,
                 num_training_steps=total_steps,
             )
+        else:
+            self.scheduler = None
 
     def _init_logger(self):
-        self.apply_warmup = self.config.getboolean("MODEL_TUNING", "apply_warmup")
-
-        # New config flag: log_to_wandb (replace previous Neptune usage)
-        self.log_to_wandb = self.config.getboolean(
-            "MODEL_TUNING", "log_to_wandb", fallback=False
-        )
-
-        if self.log_to_wandb:
+        if self.config.log_to_wandb:
             # gather params from the config section to pass to W&B
-            params = dict(self.config["MODEL_TUNING"].items())
+            params = {}
+            for key in self.config.__dataclass_fields__.keys():
+                params[key] = getattr(self.config, key)
 
-            wandb_project_name = self.config["MODEL_TUNING"].get(
-                "wandb_project_name", None
-            )
-            wandb_entity = self.config["MODEL_TUNING"].get("wandb_entity", None)
+            wandb_project_name = self.config.wandb_project_name
+            wandb_entity = self.config.wandb_entity
 
             # initialize the run (expects WANDB_API_KEY env var or w&b login)
             init_kwargs = {"project": wandb_project_name, "config": params}
@@ -150,23 +138,19 @@ class Trainer:
                 init_kwargs["entity"] = wandb_entity
 
             # keep run name deterministic-ish
-            run_name = self.config.get(
-                "MODEL_TUNING", "wandb_run_name", fallback=None
-            ) or datetime.now().strftime("%Y%m%d_%H%M%S")
+            run_name = self.config.wandb_run_name or datetime.now().strftime(
+                "%Y%m%d_%H%M%S"
+            )
             init_kwargs["name"] = run_name
 
             self.wandb_run = wandb.init(**{k: v for k, v in init_kwargs.items() if v})
             # record a few root-level fields as config (dataset sizes are filled later)
             self.wandb_run.config.update(
                 {
-                    "epochs": self.config.getint("MODEL_TUNING", "num_epochs"),
-                    "batch_size": self.config.getint("MODEL_TUNING", "batch_size"),
-                    "learning_rate": self.config.getfloat(
-                        "MODEL_TUNING", "learning_rate"
-                    ),
-                    "early_stopping": self.config.getint(
-                        "MODEL_TUNING", "early_stopping"
-                    ),
+                    "epochs": self.config.num_epochs,
+                    "batch_size": self.config.batch_size,
+                    "learning_rate": self.config.learning_rate,
+                    "early_stopping": self.config.early_stopping,
                 },
                 allow_val_change=True,
             )
@@ -176,23 +160,18 @@ class Trainer:
             self.wandb_run = None
 
     def _init_model(self):
-        self.udpipe_model = UDPipeModel(
-            self.config["MODEL_TUNING"]["path_to_udpipe_model"]
-        )
+        self.udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
 
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.config["MODEL_TUNING"]["tokenizer_name"], trust_remote_code=True
+            self.config.tokenizer_name, trust_remote_code=True
         )
 
-        base_model = AutoModel.from_pretrained(
-            self.config["MODEL_TUNING"]["model_to_fine_tune"], output_hidden_states=True
-        )
+        self.model = AutoModel.from_pretrained(
+            self.config.model_to_fine_tune, output_hidden_states=True
+        ).to(self.device)
 
-        self.model = base_model
+        layers_to_unfreeze = self.config.layers_to_unfreeze
 
-        layers_to_unfreeze = self.config["MODEL_TUNING"].getint(
-            "layers_to_unfreeze", fallback=0
-        )
         if layers_to_unfreeze > 0:
             # freeze model weights except n last layers and pooler
             for param in self.model.parameters():
@@ -204,19 +183,16 @@ class Trainer:
             for param in self.model.pooler.parameters():
                 param.requires_grad = True
 
-        self.model = self.model.to(self.device)
-
     def _init_loss(self):
-        loss_type = self.config.get("MODEL_TUNING", "loss")
-        if loss_type == "triplet_loss":
+        loss_type = self.config.loss_type
+        if "triplet_loss" in loss_type:
             self.loss = TripletLoss(
                 model=self.model,
-                margin=0.2,
+                margin=0.2 if loss_type == "triplet_loss_cosine" else 1.0,
                 p=2,
-                pool_targets=self.config.getboolean("MODEL_TUNING", "pool_targets"),
-                use_both_poolings=self.config.getboolean(
-                    "MODEL_TUNING", "use_both_poolings"
-                ),
+                loss_type=loss_type,
+                pool_targets=self.config.pool_targets,
+                use_both_poolings=self.config.use_both_poolings,
             )
         elif loss_type == "nt_xent_loss":
             self.loss = NTXentLoss(model=self.model, temperature=0.05)
@@ -224,188 +200,48 @@ class Trainer:
             self.loss = MNRLoss(
                 model=self.model,
                 temperature=0.05,
-                pool_targets=self.config.getboolean("MODEL_TUNING", "pool_targets"),
-                use_both_poolings=self.config.getboolean(
-                    "MODEL_TUNING", "use_both_poolings"
-                ),
+                pool_targets=self.config.pool_targets,
+                use_both_poolings=self.config.use_both_poolings,
             )
         else:
             raise NotImplementedError(f"Loss {loss_type} is not implemented yet")
 
-    def _init_datasets_and_loaders(self):
-        self.wsd_eval_data = self._load_wsd_eval_dataset()
-        self.train_data, self.eval_data = self._load_train_eval_datasets()
 
-        loss_type = self.config.get("MODEL_TUNING", "loss")
-        num_workers = self.config.getint("MODEL_TUNING", "num_workers", fallback=4)
-        prefetch_factor = self.config.getint(
-            "MODEL_TUNING", "prefetch_factor", fallback=2
-        )
-        drop_last = loss_type == "nt_xent_loss"
+    def _setup_data(self):
+        # 1. Load raw dataframes
+        df = pd.read_csv(self.config.train_data_path).sample(frac=1, random_state=42)
 
-        collate_fn = None
-        pool_targets = self.config.getboolean(
-            "MODEL_TUNING", "pool_targets"
-        ) or self.config.getboolean("MODEL_TUNING", "use_both_poolings")
+        # Simple 99/1 split as per your original code
+        split_idx = int(len(df) * 0.99)
+        train_df = df.iloc[:split_idx]
+        eval_df = df.iloc[split_idx:]
 
-        if loss_type == "triplet_loss":
-            self.train_dataset = TripletDataset(
-                anchor=self.train_data["anchor"].values,
-                positive=self.train_data["positive"].values,
-                negative=self.train_data["negative"].values,
-                tokenizer=self.tokenizer,
-                pool_targets=pool_targets,
-                anchor_target_word_ids=self.train_data.get(
-                    "anchor_target_word_ids", None
-                ),
-                positive_target_word_ids=self.train_data.get(
-                    "positive_target_word_ids", None
-                ),
-                negative_target_word_ids=self.train_data.get(
-                    "negative_target_word_ids", None
-                ),
-            )
-
-            self.eval_dataset = TripletDataset(
-                anchor=self.eval_data["anchor"].values,
-                positive=self.eval_data["positive"].values,
-                negative=self.eval_data["negative"].values,
-                tokenizer=self.tokenizer,
-                pool_targets=pool_targets,
-                anchor_target_word_ids=self.eval_data.get("anchor_target_word_ids"),
-                positive_target_word_ids=self.eval_data.get("positive_target_word_ids"),
-                negative_target_word_ids=self.eval_data.get("negative_target_word_ids"),
-            )
-
-            if pool_targets:
-                collate_fn = lambda batch: {
-                    "anchor_ids": torch.stack([item["anchor_ids"] for item in batch]),
-                    "anchor_mask": torch.stack([item["anchor_mask"] for item in batch]),
-                    "positive_ids": torch.stack(
-                        [item["positive_ids"] for item in batch]
-                    ),
-                    "positive_mask": torch.stack(
-                        [item["positive_mask"] for item in batch]
-                    ),
-                    "negative_ids": torch.stack(
-                        [item["negative_ids"] for item in batch]
-                    ),
-                    "negative_mask": torch.stack(
-                        [item["negative_mask"] for item in batch]
-                    ),
-                    "anchor_target_word_ids": torch.nn.utils.rnn.pad_sequence(
-                        [
-                            torch.tensor(item["anchor_target_word_ids"])
-                            for item in batch
-                        ],
-                        batch_first=True,
-                        padding_value=-1,
-                    ),
-                }
-        elif loss_type == "mnr_loss":
-            self.train_dataset = PairsDataset(
-                anchor=self.train_data["anchor"].values,
-                positive=self.train_data["positive"].values,
-                tokenizer=self.tokenizer,
-                pool_targets=pool_targets,
-                anchor_target_word_ids=self.train_data.get("anchor_target_word_ids"),
-            )
-
-            self.eval_dataset = PairsDataset(
-                anchor=self.eval_data["anchor"].values,
-                positive=self.eval_data["positive"].values,
-                tokenizer=self.tokenizer,
-                pool_targets=pool_targets,
-                anchor_target_word_ids=self.eval_data.get("anchor_target_word_ids"),
-            )
-
-            if pool_targets:
-                collate_fn = lambda batch: {
-                    "anchor_ids": torch.stack([item["anchor_ids"] for item in batch]),
-                    "anchor_mask": torch.stack([item["anchor_mask"] for item in batch]),
-                    "positive_ids": torch.stack(
-                        [item["positive_ids"] for item in batch]
-                    ),
-                    "positive_mask": torch.stack(
-                        [item["positive_mask"] for item in batch]
-                    ),
-                    "anchor_target_word_ids": torch.nn.utils.rnn.pad_sequence(
-                        [
-                            torch.tensor(item["anchor_target_word_ids"])
-                            for item in batch
-                        ],
-                        batch_first=True,
-                        padding_value=-1,
-                    ),
-                }
-        elif loss_type == "nt_xent_loss":
-            self.train_dataset = NTXentDataset(
-                view1=self.train_data["view1"].values,
-                view2=self.train_data["view2"].values,
-                tokenizer=self.tokenizer,
-            )
-
-            self.eval_dataset = NTXentDataset(
-                view1=self.eval_data["view1"].values,
-                view2=self.eval_data["view2"].values,
-                tokenizer=self.tokenizer,
-            )
-        else:
-            raise NotImplementedError(
-                f"Dataset for loss {loss_type} is not implemented yet"
-            )
-
-        self.train_loader = torch.utils.data.DataLoader(
-            self.train_dataset,
-            batch_size=self.config.getint("MODEL_TUNING", "batch_size"),
-            shuffle=True,
-            num_workers=num_workers,
-            pin_memory=True,
-            persistent_workers=True,  # Add this
-            prefetch_factor=prefetch_factor,  # Add this
-            collate_fn=collate_fn,
-            drop_last=drop_last,
+        # 2. Get loaders from Factory
+        # This keeps the Trainer class clean of dataset-specific logic
+        self.train_loader, self.eval_loader = DataFactory.get_loaders(
+            config=self.config,
+            tokenizer=self.tokenizer,
+            train_df=train_df,
+            eval_df=eval_df,
         )
 
-        self.eval_loader = torch.utils.data.DataLoader(
-            self.eval_dataset,
-            batch_size=self.config.getint("MODEL_TUNING", "batch_size"),
-            shuffle=True,
-            num_workers=num_workers,
-            pin_memory=True,
-            persistent_workers=True,  # Add this
-            prefetch_factor=prefetch_factor,  # Add this
-            collate_fn=collate_fn,
-            drop_last=False,
-        )
-
-        if self.log_to_wandb:
+        if self.config.log_to_wandb:
             # update dataset sizes in wandb config
             self.wandb_run.config.update(
                 {
-                    "dataset/train": len(self.train_data),
-                    "dataset/eval": len(self.eval_data),
+                    "dataset/train": len(train_df),
+                    "dataset/eval": len(eval_df),
                 },
                 allow_val_change=True,
             )
 
-    def _load_wsd_eval_dataset(self):
-        wsd_eval_data = pd.read_csv(
-            self.config["MODEL_TUNING"]["path_to_wsd_eval_dataset"]
-        )
-        wsd_eval_data["examples"] = wsd_eval_data["examples"].apply(literal_eval)
-        wsd_eval_data["gloss"] = wsd_eval_data["gloss"].apply(
+        # 3. Load WSD-specific evaluation data (The 'Ground Truth' for WSD tasks)
+        self.wsd_eval_df = pd.read_csv(self.config.wsd_eval_path)
+        # Applying your original parsing logic
+        self.wsd_eval_df["examples"] = self.wsd_eval_df["examples"].apply(literal_eval)
+        self.wsd_eval_df["gloss"] = self.wsd_eval_df["gloss"].apply(
             lambda x: literal_eval(x) if x.startswith("[") else [x]
         )
-        return wsd_eval_data
-
-    def _load_train_eval_datasets(self):
-        data = pd.read_csv(self.config["MODEL_TUNING"]["path_to_triplet_dataset"])
-        data = data.sample(frac=1)
-        train_data = data[: int(len(data) * 0.99)]
-        eval_data = data[int(len(data) * 0.99) :]
-
-        return train_data, eval_data
 
     def _calculate_wsd_accuracy(self, eval_data):
         word_sense_detector = WordSenseDetector(
@@ -442,11 +278,11 @@ class Trainer:
         mean_eval_loss = eval_loss / len(self.eval_loader)
 
         with autocast(self.device.type, dtype=torch.float16, enabled=self.use_amp):
-            wsd_acc = self._calculate_wsd_accuracy(self.wsd_eval_data)
+            wsd_acc = self._calculate_wsd_accuracy(self.wsd_eval_df)
 
         report_gpu()
 
-        if self.log_to_wandb:
+        if self.config.log_to_wandb:
             # log epoch-level eval metrics
             self.wandb_run.log(
                 {
@@ -463,19 +299,19 @@ class Trainer:
 
             if batch_count > 0:
                 # save the model and upload to W&B as artifact if enabled
-                model_dir = f"{self.config['MODEL_TUNING']['path_to_save_fine_tuned_model']}/model_{self.run_id}_{epoch}"
+                model_dir = f"{self.config.path_to_save_fine_tuned_model}/model_{self.run_id}_{epoch}"
                 self._save_model(
                     self.model,
                     model_dir,
                 )
 
-                if self.log_to_wandb:
-                    # create an artifact for the saved model directory
-                    artifact = wandb.Artifact(
-                        name=f"model_{self.run_id}_{epoch}", type="model"
-                    )
-                    artifact.add_dir(model_dir)
-                    self.wandb_run.log_artifact(artifact)
+                # if self.config.log_to_wandb:
+                #     # create an artifact for the saved model directory
+                #     artifact = wandb.Artifact(
+                #         name=f"model_{self.run_id}_{epoch}", type="model"
+                #     )
+                #     artifact.add_dir(model_dir)
+                #     self.wandb_run.log_artifact(artifact)
 
         elif wsd_acc <= self.max_wsd_acc:
             self.rounds_count += 1
@@ -490,9 +326,9 @@ class Trainer:
             }
         )
 
-        if self.rounds_count >= self.config.getint("MODEL_TUNING", "early_stopping"):
+        if self.rounds_count >= self.config.early_stopping:
             print(
-                f'Early stopping, model not improve WSD for {self.config.getint("MODEL_TUNING", "early_stopping")}'
+                f"Early stopping, model not improve WSD for {self.config.early_stopping}"
             )
             return True
 
@@ -503,34 +339,33 @@ class Trainer:
 
         for batch_count, batch in enumerate(train_bar):
             self.model.train()
-            self.optim.zero_grad()
+            self.optimizer.zero_grad()
 
             with autocast(self.device.type, dtype=torch.float16, enabled=self.use_amp):
                 loss = self.loss(batch).to(self.device)
 
             self.scaler.scale(loss).backward()
-            max_grad_norm = self.config.getfloat(
-                "MODEL_TUNING", "max_grad_norm", fallback=0.0
-            )
+            max_grad_norm = self.config.max_grad_norm
             if max_grad_norm and max_grad_norm > 0:
-                self.scaler.unscale_(self.optim)
+                self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
-            self.scaler.step(self.optim)
+
+            self.scaler.step(self.optimizer)
             self.scaler.update()
 
             self.train_avg_meter.update(
-                loss.item(), self.config.getint("MODEL_TUNING", "batch_size")
+                loss.item(), self.config.batch_size
             )  # TODO: .detach().cpu()?
 
-            if self.apply_warmup:
+            if self.config.apply_warmup:
                 self.scheduler.step()
 
-            if self.log_to_wandb:
+            if self.config.log_to_wandb:
                 acc_val, acc_avg = self.train_avg_meter()
                 self.wandb_run.log(
                     {
                         "train/loss": acc_avg,
-                        "train/lr": self.optim.param_groups[0]["lr"],
+                        "train/lr": self.optimizer.param_groups[0]["lr"],
                         "epoch": epoch,
                     },
                     step=self.global_step,
@@ -539,19 +374,14 @@ class Trainer:
             # increment global step for W&B alignment
             self.global_step += 1
 
-            if (
-                batch_count > 0
-                and batch_count
-                % self.config.getint("MODEL_TUNING", "num_batch_to_eval")
-                == 0
-            ):
+            if batch_count > 0 and batch_count % self.config.num_batch_to_eval == 0:
                 if self.evaluate_epoch(epoch, batch_count):
                     return True  # reach early stopping rounds
 
     def train(self):
         try:
             # initial evaluation of the raw model
-            for epoch in range(self.config.getint("MODEL_TUNING", "num_epochs")):
+            for epoch in range(self.config.num_epochs):
                 early_stop = self.evaluate_epoch(epoch=epoch, batch_count=0)
                 report_gpu()
 
@@ -559,13 +389,11 @@ class Trainer:
                     early_stop = self.train_epoch(epoch)
 
                 if early_stop:
-                    path_to_save_model = self.config["MODEL_TUNING"][
-                        "path_to_save_fine_tuned_model"
-                    ]
+                    path_to_save_model = self.config.path_to_save_fine_tuned_model
                     model_name = f"{path_to_save_model}/model_{self.run_id}_{epoch}_early_stopped"
                     self._save_model(self.model, model_name)
 
-                    if self.log_to_wandb:
+                    if self.config.log_to_wandb:
                         artifact = wandb.Artifact(
                             name=f"model_{self.run_id}_{epoch}_early_stopped",
                             type="model",
@@ -574,39 +402,42 @@ class Trainer:
                         self.wandb_run.log_artifact(artifact)
                     break
 
-                path_to_save_model = self.config["MODEL_TUNING"][
-                    "path_to_save_fine_tuned_model"
-                ]
+                path_to_save_model = self.config.path_to_save_fine_tuned_model
                 model_name = f"{path_to_save_model}/model_{self.run_id}_{epoch}"
                 self._save_model(self.model, model_name)
 
-                if self.log_to_wandb:
-                    artifact = wandb.Artifact(
-                        name=f"model_{self.run_id}_{epoch}", type="model"
-                    )
-                    artifact.add_dir(model_name)
-                    self.wandb_run.log_artifact(artifact)
+                # if self.config.log_to_wandb:
+                    # artifact = wandb.Artifact(
+                    #     name=f"model_{self.run_id}_{epoch}", type="model"
+                    # )
+                    # artifact.add_dir(model_name)
+                    # self.wandb_run.log_artifact(artifact)
         finally:
-            path_to_save_model = self.config["MODEL_TUNING"][
-                "path_to_save_fine_tuned_model"
-            ]
+            path_to_save_model = self.config.path_to_save_fine_tuned_model
             model_name = f"{path_to_save_model}/model_{self.run_id}_final"
             self._save_model(self.model, model_name)
+            
+            # final evaluation of the model
+            wsd_acc = evaluate_wsd(
+                model_path=model_name,
+                model_tokenizer_path=self.config.tokenizer_name,
+                verbose=True,
+            )
+            
+            # log final WSD accuracy to W&B if enabled
+            if self.config.log_to_wandb:
+                # artifact = wandb.Artifact(
+                #     name=f"model_{self.run_id}_final", type="model"
+                # )
+                # artifact.add_dir(model_name)
+                # self.wandb_run.log_artifact(artifact)
 
-            if self.log_to_wandb:
-                artifact = wandb.Artifact(
-                    name=f"model_{self.run_id}_final", type="model"
-                )
-                artifact.add_dir(model_name)
-                self.wandb_run.log_artifact(artifact)
+                self.wandb_run.log({"test/wsd_acc": wsd_acc}, step=self.global_step)
                 wandb.finish()
 
 
 if __name__ == "__main__":
-    import configparser
+    config_path = "services/trainer/fine_tuning_config.ini"
 
-    config = configparser.ConfigParser()
-    config.read("services/trainer/fine_tuning_config.ini")
-
-    model_trainer = Trainer(config)
+    model_trainer = Trainer(config_path)
     model_trainer.train()

@@ -127,6 +127,7 @@ class DataFactory:
 
         loss_type_to_collate = {
             "triplet_loss": triplet_collate,
+            "triplet_loss_cosine": triplet_collate,
             "mnr_loss": mnr_collate,
         }
 

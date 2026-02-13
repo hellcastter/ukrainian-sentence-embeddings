@@ -1,34 +1,45 @@
-from datasets import load_dataset, load_from_disk
-from sentence_transformers import SentenceTransformer, evaluation, models
-
-eval_dataset = load_dataset("sentence-transformers/stsb")
-
-sentences1 = eval_dataset["train"]["sentence1"]
-sentences2 = eval_dataset["train"]["sentence2"]
-
-scores = eval_dataset["train"]["score"]
-# fix 1.0 scores for identical sentences
-scores = [1.0 if s1 == s2 else s for s1, s2, s in zip(sentences1, sentences2, scores)]
+from datasets import load_dataset
+from sentence_transformers import SentenceTransformer, evaluation
 
 
-path_to_save_model = "models/fine-tuned-models/model_-166_0"
-base_model = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+model_name_or_path = "models/fine-tuned-models/model_dp0m7h33_final"
+benchmark_hf = "sentence-transformers/stsb"
 
-transformer = models.Transformer(path_to_save_model, tokenizer_name_or_path=base_model)
-pooling = models.Pooling(
-    transformer.get_word_embedding_dimension(),
-    pooling_mode_mean_tokens=True,
-    pooling_mode_cls_token=False,
-    pooling_mode_max_tokens=False,
-)
 
-model = SentenceTransformer(modules=[transformer, pooling])
+def main():
+    ## load benchmark
+    # there is not test split for this benchmark, so we use train split for evaluation
+    eval_dataset = load_dataset(benchmark_hf, split="train")
 
-evaluator = evaluation.EmbeddingSimilarityEvaluator(
-    sentences1, sentences2, scores, name="sts-dev"
-)
+    sentences1 = eval_dataset["sentence1"]
+    sentences2 = eval_dataset["sentence2"]
 
-print(evaluator(model))
+    scores = eval_dataset["score"]
+    # fix 1.0 scores for identical sentences
+    scores = [
+        1.0 if s1 == s2 else s for s1, s2, s in zip(sentences1, sentences2, scores)
+    ]
 
-# # sentence-transformers/paraphrase-multilingual-mpnet-base-v2
-# # {'sts-dev_pearson_cosine': 0.8314385469524757, 'sts-dev_spearman_cosine': 0.8214346284594765}
+    ## load model
+    model = SentenceTransformer(model_name_or_path)
+
+    ## evaluate model
+    evaluator = evaluation.EmbeddingSimilarityEvaluator(
+        sentences1, sentences2, scores, show_progress_bar=True
+    )
+
+    print(f"Evaluating model {model_name_or_path} on STS benchmark...")
+    print(evaluator(model))
+
+    # sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+    # {'pearson_cosine': 0.8630022521158784, 'spearman_cosine': 0.8592535781144339}
+
+    # intfloat/multilingual-e5-large
+    # {'pearson_cosine': 0.8545772316485915, 'spearman_cosine': 0.8525929803955488}
+
+    # intfloat/multilingual-e5-large-instruct
+    # {'pearson_cosine': 0.8455628969019475, 'spearman_cosine': 0.8568462550313934}
+
+
+if __name__ == "__main__":
+    main()

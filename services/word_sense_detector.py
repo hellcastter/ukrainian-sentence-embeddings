@@ -20,9 +20,9 @@ class WordSenseDetector:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         if isinstance(pretrained_model, str):
-            self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
+            self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model, trust_remote_code=True)
             self.model = AutoModel.from_pretrained(
-                pretrained_model, output_hidden_states=True
+                pretrained_model, output_hidden_states=True, trust_remote_code=True
             ).to(self.device)
         else:
             self.tokenizer = kwargs["tokenizer"]

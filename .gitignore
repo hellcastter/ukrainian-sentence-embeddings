@@ -23,6 +23,8 @@ venv/
 
 # temporary files
 tmp/
+cache/
+eval/mteb_*
 
 # loggers
 .neptune/

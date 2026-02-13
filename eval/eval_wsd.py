@@ -8,16 +8,17 @@ from services.utils_results import results_reports
 from services.utils_data import read_and_transform_data
 from services.word_sense_detector import WordSenseDetector
 from services.prediction_strategies import PredictionStrategy
-from services.config import PATH_TO_SOURCE_UDPIPE, SUM_14_PATH
+from services.config import PATH_TO_SOURCE_UDPIPE, SUM_14_PATH, SUM_12_PATH
 from services.utils_results import prediction_accuracy
 
 
 from transformers import AutoTokenizer, AutoModel
 
-MODEL_TOKENIZER_PATH = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-# MODEL_TOKENIZER_PATH = "intfloat/multilingual-e5-large"
-MODEL_PATH = "models/fine-tuned-models/model_p23szux0_1"
+# MODEL_TOKENIZER_PATH = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 # MODEL_PATH="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+
+# MODEL_TOKENIZER_PATH = "intfloat/multilingual-e5-large"
+# MODEL_PATH = "models/fine-tuned-models/model_dp0m7h33_final"
 
 DEVICE = "cuda"  # or "cpu"
 
@@ -35,8 +36,8 @@ def evaluate_wsd(
     data = read_and_transform_data(sum_path, homonym=True)
 
     print("Loading fine-tuned model...")
-    tokenizer = AutoTokenizer.from_pretrained(model_tokenizer_path)
-    model = AutoModel.from_pretrained(model_path, output_hidden_states=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_tokenizer_path, trust_remote_code=True)
+    model = AutoModel.from_pretrained(model_path, output_hidden_states=True, trust_remote_code=True)
     model = model.to(DEVICE).eval()
 
     print("Loading UDPipe model...")

@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 from torch.amp import GradScaler, autocast
 
+from sentence_transformers import SentenceTransformer, models
 from transformers import AutoTokenizer, AutoModel
 from transformers.optimization import get_linear_schedule_with_warmup
 
@@ -23,7 +24,6 @@ from tqdm.auto import tqdm
 from services.trainer.data_factory import DataFactory
 from services.trainer.training_config import TrainingConfig
 
-# from services.trainer.reinit_model_weights import ModelWithRandomizingSomeWeights
 from services.udpipe_model import UDPipeModel
 from services.word_sense_detector import WordSenseDetector
 from services.utils_results import prediction_accuracy
@@ -35,9 +35,11 @@ from services.config import PATH_TO_SOURCE_UDPIPE
 from eval.eval_wsd import evaluate_wsd
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import warnings
+
 # warnings.simplefilter('ignore')
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -78,7 +80,6 @@ class ContrastiveModel(nn.Module):
 # TODO: add logging to the class Trainer
 class Trainer:
     def __init__(self, config: str):
-        # TODO: i think that a lot of the following code should be move to separate file
         self.config = TrainingConfig.from_config(config)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -104,9 +105,7 @@ class Trainer:
 
     def _setup_optimizer(self):
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), 
-            lr=self.config.learning_rate, 
-            weight_decay=0.01
+            self.model.parameters(), lr=self.config.learning_rate, weight_decay=0.01
         )
 
         # Warmup logic: needs the total number of training steps
@@ -167,7 +166,9 @@ class Trainer:
         )
 
         self.model = AutoModel.from_pretrained(
-            self.config.model_to_fine_tune, output_hidden_states=True
+            self.config.model_to_fine_tune,
+            output_hidden_states=True,
+            trust_remote_code=True,
         ).to(self.device)
 
         layers_to_unfreeze = self.config.layers_to_unfreeze
@@ -205,7 +206,6 @@ class Trainer:
             )
         else:
             raise NotImplementedError(f"Loss {loss_type} is not implemented yet")
-
 
     def _setup_data(self):
         # 1. Load raw dataframes
@@ -256,12 +256,21 @@ class Trainer:
         eval_data = word_sense_detector.run()
         return prediction_accuracy(eval_data)
 
-    def _save_model(self, model, path_to_save_model):
+    def _save_model(
+        self, model, path_to_save_model, save_sentence_transformer_format=True
+    ):
         try:
-            if isinstance(model, torch.nn.DataParallel):
-                model.module.save_pretrained(path_to_save_model, from_pt=True)
-            else:
-                model.save_pretrained(path_to_save_model, from_pt=True)
+            model.save_pretrained(path_to_save_model, from_pt=True)
+            self.tokenizer.save_pretrained(path_to_save_model)
+
+            if save_sentence_transformer_format:
+                # Save in SentenceTransformer format for compatibility with eval scripts
+                transformer = models.Transformer(path_to_save_model)
+                pooling = models.Pooling(transformer.get_word_embedding_dimension())
+                sentence_transformer_model = SentenceTransformer(
+                    modules=[transformer, pooling]
+                )
+                sentence_transformer_model.save(path_to_save_model)
         except Exception as e:
             print(f"model not saved, error = {e}")
 
@@ -299,21 +308,10 @@ class Trainer:
 
             if batch_count > 0:
                 # save the model and upload to W&B as artifact if enabled
-                model_dir = f"{self.config.path_to_save_fine_tuned_model}/model_{self.run_id}_{epoch}"
-                self._save_model(
-                    self.model,
-                    model_dir,
-                )
+                model_dir = f"{self.config.path_to_save_fine_tuned_model}/model_{self.run_id}_best"
+                self._save_model(self.model, model_dir)
 
-                # if self.config.log_to_wandb:
-                #     # create an artifact for the saved model directory
-                #     artifact = wandb.Artifact(
-                #         name=f"model_{self.run_id}_{epoch}", type="model"
-                #     )
-                #     artifact.add_dir(model_dir)
-                #     self.wandb_run.log_artifact(artifact)
-
-        elif wsd_acc <= self.max_wsd_acc:
+        else:
             self.rounds_count += 1
 
         print(
@@ -385,53 +383,34 @@ class Trainer:
                 early_stop = self.evaluate_epoch(epoch=epoch, batch_count=0)
                 report_gpu()
 
-                if not early_stop:
-                    early_stop = self.train_epoch(epoch)
+                early_stop = early_stop or self.train_epoch(epoch)
 
                 if early_stop:
                     path_to_save_model = self.config.path_to_save_fine_tuned_model
                     model_name = f"{path_to_save_model}/model_{self.run_id}_{epoch}_early_stopped"
                     self._save_model(self.model, model_name)
 
-                    if self.config.log_to_wandb:
-                        artifact = wandb.Artifact(
-                            name=f"model_{self.run_id}_{epoch}_early_stopped",
-                            type="model",
-                        )
-                        artifact.add_dir(model_name)
-                        self.wandb_run.log_artifact(artifact)
                     break
 
                 path_to_save_model = self.config.path_to_save_fine_tuned_model
                 model_name = f"{path_to_save_model}/model_{self.run_id}_{epoch}"
                 self._save_model(self.model, model_name)
-
-                # if self.config.log_to_wandb:
-                    # artifact = wandb.Artifact(
-                    #     name=f"model_{self.run_id}_{epoch}", type="model"
-                    # )
-                    # artifact.add_dir(model_name)
-                    # self.wandb_run.log_artifact(artifact)
+        except Exception as e:
+            print(f"Training interrupted, error = {e}")
         finally:
             path_to_save_model = self.config.path_to_save_fine_tuned_model
             model_name = f"{path_to_save_model}/model_{self.run_id}_final"
             self._save_model(self.model, model_name)
-            
+
             # final evaluation of the model
             wsd_acc = evaluate_wsd(
                 model_path=model_name,
                 model_tokenizer_path=self.config.tokenizer_name,
                 verbose=True,
             )
-            
+
             # log final WSD accuracy to W&B if enabled
             if self.config.log_to_wandb:
-                # artifact = wandb.Artifact(
-                #     name=f"model_{self.run_id}_final", type="model"
-                # )
-                # artifact.add_dir(model_name)
-                # self.wandb_run.log_artifact(artifact)
-
                 self.wandb_run.log({"test/wsd_acc": wsd_acc}, step=self.global_step)
                 wandb.finish()
 

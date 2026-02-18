@@ -5,7 +5,12 @@ import torch.nn.functional as F
 
 class TripletLoss(nn.Module):
     def __init__(
-        self, model, margin=1.0, p=2, pool_targets=False, use_both_poolings=False,
+        self,
+        model,
+        margin=1.0,
+        p=2,
+        pool_targets=False,
+        use_both_poolings=False,
         loss_type="triplet_loss",
         dynamic=False,
     ):
@@ -17,24 +22,20 @@ class TripletLoss(nn.Module):
         self.loss_fn = None
         self.loss_type = loss_type
         self.dynamic = dynamic
-        
+
         if self.loss_type == "triplet_loss":
             self.loss_fn = nn.TripletMarginLoss(margin=self.margin, p=self.p)
         elif self.loss_type == "triplet_loss_cosine":
             self.loss_fn = nn.TripletMarginWithDistanceLoss(
-                margin=self.margin, 
+                margin=self.margin,
                 distance_function=self._cosine_distance,
             )
         else:
             raise Exception(f"{self.loss_type} loss is not supported")
-            
-        self.use_both_poolings = use_both_poolings
 
-        if isinstance(self.model, nn.DataParallel):
-            self.device = self.model.module.device
-        else:
-            self.device = self.model.device
-            
+        self.use_both_poolings = use_both_poolings
+        self.device = self.model.device
+
     @staticmethod
     def _cosine_distance(x, y):
         x = F.normalize(x, p=2, dim=-1)
@@ -78,11 +79,7 @@ class TripletLoss(nn.Module):
         )
 
         return pooled
-        # masked_embeds = token_embeds.masked_fill(mask == 0, -1e9)
 
-        # pooled, _ = masked_embeds.max(dim=1)
-        # return pooled
-        
     @property
     def distance(self):
         if self.loss_type == "triplet_loss":
@@ -92,7 +89,7 @@ class TripletLoss(nn.Module):
 
     def forward(self, batch):
         batch = {
-            k: v.to(self.device) for k, v in batch.items() if "target_word_ids" not in k
+            k: v.to(self.device) for k, v in batch.items()
         }
 
         a = self.model(
@@ -124,7 +121,7 @@ class TripletLoss(nn.Module):
                 batch.get("negative_target_word_ids"),
                 pool_targets=self.pool_targets,
             )
-            
+
             # swap a and p if positive is closer to negative than anchor
             if self.dynamic and self.distance(a, n) > self.distance(p, n):
                 a, p = p, n

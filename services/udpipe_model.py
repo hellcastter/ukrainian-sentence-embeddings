@@ -1,16 +1,20 @@
 import ufal.udpipe
-
+import logging
 
 class UDPipeModel:
     def __init__(self, path):
         """Load given model."""
+        logging.info(f"Loading UDPipe model from '{path}'...")
+
         self.model = ufal.udpipe.Model.load(path)
         self.tokenizer = self.model.newTokenizer(self.model.DEFAULT)
         if not self.tokenizer:
             raise Exception("The model does not have a tokenizer")
 
         if not self.model:
-            raise Exception("Cannot load UDPipe model from file '%s'" % path)
+            raise Exception(f"Cannot load UDPipe model from file '{path}'")
+
+        logging.info("Model loaded successfully.")
 
     def tokenize(self, text):
         """Tokenize the text and return list of ufal.udpipe.Sentence-s."""
@@ -49,7 +53,7 @@ class UDPipeModel:
         """Write given ufal.udpipe.Sentence-s in the required format (conllu|horizontal|vertical)."""
 
         output_format = ufal.udpipe.OutputFormat.newOutputFormat(out_format)
-        output = ''
+        output = ""
         for sentence in sentences:
             output += output_format.writeSentence(sentence)
         output += output_format.finishDocument()

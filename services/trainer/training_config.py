@@ -1,6 +1,5 @@
 import configparser
 from dataclasses import dataclass, fields
-from typing import Any, Dict
 
 @dataclass
 class TrainingConfig:
@@ -69,6 +68,3 @@ class TrainingConfig:
                     break # Found the value, move to next field
                     
         return conf
-
-# Example Usage:
-# config = TrainingConfig.from_config("settings.ini")

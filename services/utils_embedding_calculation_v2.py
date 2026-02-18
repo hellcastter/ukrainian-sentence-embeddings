@@ -60,9 +60,13 @@ def same_lemma(a: str, b: str) -> bool:
 def _find_target_word_in_sentence(udpipe_model, input_text: str, target_word: str):
     target_word = target_word.strip().lower()
 
-    tokenized = udpipe_model.tokenize(target_word)
-    udpipe_model.tag(tokenized[0])
-    target_word_lemma = "".join([i.lemma.lower() for i in tokenized[0].words[1:]])
+    try:
+        tokenized = udpipe_model.tokenize(target_word)
+        udpipe_model.tag(tokenized[0])
+        target_word_lemma = "".join([i.lemma.lower() for i in tokenized[0].words[1:]])
+    except Exception as e:
+        print(f"UDPipe failed to lemmatize target word '{target_word}'")
+        raise e
 
     tokenized = udpipe_model.tokenize(input_text)
     for tok_sent in tokenized:

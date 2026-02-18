@@ -224,7 +224,7 @@ class Trainer:
             train_df=train_df,
             eval_df=eval_df,
         )
-
+        
         if self.config.log_to_wandb:
             # update dataset sizes in wandb config
             self.wandb_run.config.update(
@@ -416,7 +416,11 @@ class Trainer:
 
 
 if __name__ == "__main__":
-    config_path = "services/trainer/fine_tuning_config.ini"
+    import argparse
+    parser = argparse.ArgumentParser(description="Fine-tune a model for WSD")
+    parser.add_argument("--config", type=str, default="services/trainer/fine_tuning_config.ini", help="Path to the training config file")
+    args = parser.parse_args()
+    config_path = args.config
 
     model_trainer = Trainer(config_path)
     model_trainer.train()

@@ -94,13 +94,38 @@ def homonym_preparation(data):
     return data
 
 
-def drop_duplicates(data):
+def drop_duplicates(data, udpipe_model=None):
     data.sort_values("lemma", inplace=True)
-    data.drop_duplicates(subset=["lemma", "gloss"], inplace=True)
+    # make copy of glosses to avoid changing original glosses in data
+    # replace "." to "" in glosses to avoid duplicates with different glosses because of "." in them
+    data["gloss_copy"] = data.gloss.apply(
+        lambda x: x.replace(".", "")
+        .replace("-", " ")
+        .replace(ACUTE, "")
+        .replace(GRAVE, "")
+    )
+    # replace all numbers to ""
+    data["gloss_copy"] = data.gloss_copy.apply(lambda x: re.sub(r"\d+", "", x))
+
+    # lemmatize glosses to avoid duplicates with different forms of words in them
+    import spacy
+
+    nlp = spacy.load("uk_core_news_sm", enable=["lemmatizer", "tokenizer", "tagger"])
+    data["gloss_copy"] = data.gloss_copy.apply(
+        lambda x: " ".join(
+            [token.lemma_ for token in nlp(x) if token.pos_ not in ["PUNCT", "SPACE"]]
+        )
+    )
+
+    data.drop_duplicates(subset=["lemma", "gloss_copy"], inplace=True)
 
     data["str_examples"] = data.examples.astype(str)
-    data.drop_duplicates(subset=["str_examples", "gloss"], inplace=True)
+    data.drop_duplicates(subset=["str_examples", "gloss_copy"], inplace=True)
     data.drop(columns=["str_examples"], inplace=True)
+
+    # drop gloss_copy column
+    # data.drop(columns=["gloss_copy"], inplace=True)
+
     return data
 
 
@@ -113,6 +138,24 @@ def parse_synset(data):
     )
     data.drop(columns=["sense_id"], inplace=True)
     data["examples"] = data["examples"].apply(lambda x: [i["ex_text"] for i in x])
+    return data
+
+
+def fix_vocabulary_patterns(data):
+    pattern = r" \([^\(]*?знач[^\)]*?\)"
+    data.gloss = data.gloss.apply(lambda x: re.sub(pattern, "", x))
+
+    pattern = r"\s\(див\..*?\)"
+    data.gloss = data.gloss.apply(lambda x: re.sub(pattern, "", x))
+
+    # replace "Збірн." to "Збірний"
+    pattern = r"^Збірн\."
+    data.gloss = data.gloss.apply(lambda x: re.sub(pattern, "Збірне", x))
+
+    # replace ending with space+digit with empty string
+    pattern = r"\s\d+$"
+    data.gloss = data.gloss.apply(lambda x: re.sub(pattern, "", x))
+
     return data
 
 
@@ -152,15 +195,10 @@ def read_and_transform_data(
     data = data[~data.lemma.isin(LEMMAS_TO_REMOVE)]
 
     # data = drop_duplicates(data)
+    data = fix_vocabulary_patterns(data)
 
-    pattern = r" \([^\(]*?знач[^\)]*?\)"
-    data.gloss = data.gloss.apply(lambda x: re.sub(pattern, "", x))
-
-    pattern = r'\s\(див\..*?\)'
-    data.gloss = data.gloss.apply(lambda x: re.sub(pattern, '', x))
-    
     data = drop_duplicates(data)
-
+    
     if homonym:
         data = (
             data.groupby(["lemma", "order"])
@@ -168,6 +206,7 @@ def read_and_transform_data(
             .reset_index()
             .drop(columns=["order"])
         )
+        
     else:
         data["gloss"] = data.gloss.apply(lambda x: [x])
 

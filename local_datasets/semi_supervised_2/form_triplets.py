@@ -4,7 +4,9 @@ Run: python3 -m local_datasets.semi_supervised_2.form_triplets
 
 import csv
 import json
+import logging
 import random
+from collections import defaultdict
 
 import spacy
 from tqdm import tqdm
@@ -12,20 +14,41 @@ from transformers import AutoTokenizer
 
 from services.udpipe_model import UDPipeModel
 from services.config import PATH_TO_SOURCE_UDPIPE
-
-DATASET_PATH = "local_datasets/semi_supervised/merged_collected_and_generated.json"
-OUTPUT_CSV = "local_datasets/semi_supervised_2/triplets_semi_supervised.csv"
-TOKENIZER = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-BACK_TRANSLATION_PATH = (
-    "local_datasets/translation/augmented_sentences_translated_v3.jsonl"
+from services.utils_embedding_calculation_v2 import (
+    _find_target_word_in_sentence,
+    _find_target_word_in_tokenized_text,
 )
-DEFINITIONS_BACK_TRANSLATION_PATH = (
-    "local_datasets/translation/augmented_sentences_translated_definitions.jsonl"
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    force=True,
+)
+
+DATASET_PATH = (
+    "local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json"
+)
+OUTPUT_CSV = (
+    "local_datasets/semi_supervised_2/triplets_semi_supervised_dropout.csv"
+)
+TOKENIZER = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+AUGMENTATION_PATHS = (
+    # "local_datasets/augmented/token_shuffling/augmented_sentences.jsonl",
+    # "local_datasets/augmented/translation/augmented_sentences_translated_v3.jsonl",
+    "local_datasets/augmented/dropout/augmented_sentences.jsonl",
+    
+)
+DEFINITIONS_AUGMENTATION_PATHS = (
+    # "local_datasets/augmented/token_shuffling/augmented_sentences_definitions.jsonl",
+    # "local_datasets/augmented/translation/augmented_sentences_translated_definitions.jsonl",
+    "local_datasets/augmented/dropout/augmented_sentences_definitions.jsonl",
+    
 )
 
 MAX_SENTENCES_PER_MEANING = 50
-USE_BACK_TRANSLATED = True
-USE_DEFINITIONS_BACK_TRANSLATED = True
+USE_AUGMENTED = True
+USE_DEFINITIONS_AUGMENTED = True
 
 SCHEMA = [
     "lemma",
@@ -50,158 +73,6 @@ def get_recommended_number_of_sentences(
     return base + 1 if index < remainder else base
 
 
-def ngrams(s: str, n: int = 3) -> set[str]:
-    return {s[i : i + n] for i in range(len(s) - n + 1)}
-
-
-def char_dice(a: str, b: str, n: int = 3) -> float:
-    """
-    Character n-gram Sørensen–Dice coefficient.
-    Designed for fuzzy lemma matching (e.g., Ukrainian morphology noise).
-    """
-
-    # normalize
-    a = a.lower().strip()
-    b = b.lower().strip()
-
-    # exact match shortcut
-    if a == b:
-        return 1.0
-
-    # guard against garbage
-    if not a or not b:
-        return 0.0
-
-    # if too short, don't lie
-    if min(len(a), len(b)) < n:
-        return 0.0
-
-    na = ngrams(a, n)
-    nb = ngrams(b, n)
-
-    if not na or not nb:
-        return 0.0
-
-    return 2 * len(na & nb) / (len(na) + len(nb))
-
-
-def same_lemma(a: str, b: str) -> bool:
-    if a in b or b in a:
-        return True
-
-    # length guard
-    if min(len(a), len(b)) < 4:
-        return False
-
-    # character 3-gram Jaccard
-    if char_dice(a, b) >= 0.5:
-        return True
-
-    return False
-
-
-def normalize_word(word: str) -> str:
-    return (
-        word.replace("«", "")
-        .replace("»", "")
-        .replace('"', "")
-        .replace("“", "")
-        .replace("”", "")
-        .replace("(", "")
-        .replace(")", "")
-        .replace(",", "")
-        .replace(".", "")
-        .strip()
-    )
-
-
-def _find_target_word_in_tokenized_text_new(tokenizer, tokenized_input_text, word: str):
-    target_words_with_indexes = []
-
-    word = word.strip().lower()
-    current_word = ""
-    start_index = 0
-
-    zipped = zip(tokenized_input_text["input_ids"][0], tokenized_input_text.word_ids())
-    for index, (input_id, word_id) in enumerate(zipped):
-        token = tokenizer.decode([input_id]).strip()
-
-        # Remove subword prefix if present
-        if token.startswith("##"):
-            token = token.replace("##", "")
-
-        token = token.replace("▁", "").lower()
-
-        current_word += token
-        current_word_normalized = normalize_word(current_word)
-
-        if word.startswith(current_word_normalized):
-            if word == current_word_normalized:
-                end_index = index
-                target_words_with_indexes.append(
-                    (word, list(range(start_index, end_index + 1)))
-                )
-
-                current_word = ""
-                start_index = index + 1
-
-        else:
-            current_word = token
-            start_index = index
-            current_word_normalized = normalize_word(current_word)
-
-            if word.startswith(current_word_normalized):
-                if word == current_word_normalized:
-                    end_index = index
-                    target_words_with_indexes.append(
-                        (word, list(range(start_index, end_index + 1)))
-                    )
-
-                    current_word = ""
-                    start_index = index + 1
-            else:
-                current_word = ""
-                start_index = index + 1
-
-    return target_words_with_indexes
-
-
-def _find_target_word_in_sentence(
-    udpipe_model: UDPipeModel, input_text: str, target_word: str
-):
-    target_word = target_word.strip().lower()
-
-    tokenized = udpipe_model.tokenize(target_word)
-    udpipe_model.tag(tokenized[0])
-    target_word_lemma = "".join([i.lemma.lower() for i in tokenized[0].words[1:]])
-
-    tokenized = udpipe_model.tokenize(input_text)
-    for tok_sent in tokenized:
-        udpipe_model.tag(tok_sent)
-
-        for word_index, w in enumerate(tok_sent.words[1:]):  # under 0 index is root
-            token_lemma = w.lemma.lower()
-
-            if same_lemma(target_word, token_lemma) or same_lemma(
-                target_word_lemma, token_lemma
-            ):
-                return tok_sent.words[word_index + 1].form
-
-    # use spacy as fallback
-    target_word_lemma = "".join([i.lemma_.lower() for i in spacy_nlp(target_word)])
-
-    doc = spacy_nlp(input_text)
-    for token in doc:
-        token_lemma = token.lemma_.lower()
-
-        if same_lemma(target_word, token_lemma) or same_lemma(
-            target_word_lemma, token_lemma
-        ):
-            return token.text
-
-    return None
-
-
 def get_target_word_embedding_idx(udpipe_model, tokenizer, sentence: str, lemma: str):
     word_in_sentence = _find_target_word_in_sentence(udpipe_model, sentence, lemma)
 
@@ -209,7 +80,7 @@ def get_target_word_embedding_idx(udpipe_model, tokenizer, sentence: str, lemma:
         return None, None
 
     inputs = tokenizer(sentence, return_tensors="pt")
-    word_positions = _find_target_word_in_tokenized_text_new(
+    word_positions = _find_target_word_in_tokenized_text(
         tokenizer, inputs, word_in_sentence
     )
 
@@ -238,15 +109,15 @@ def main():
                 for neg_dict in negatives_dicts:
                     negatives.update(neg_dict["meaning"]["gloss"])
 
-                if USE_DEFINITIONS_BACK_TRANSLATED:
+                if USE_DEFINITIONS_AUGMENTED:
                     for positive in list(positives):
                         positives.update(
-                            definitions_back_translated_sentences.get(positive, [])
+                            definitions_augmented_sentences.get(positive, [])
                         )
 
                     for negative in list(negatives):
                         negatives.update(
-                            definitions_back_translated_sentences.get(negative, [])
+                            definitions_augmented_sentences.get(negative, [])
                         )
 
                 positives = list(positives)
@@ -266,8 +137,8 @@ def main():
                         get_recommended_number_of_sentences(len(sentences), index)
                     )
 
-                    if USE_BACK_TRANSLATED:
-                        anchors_augmented = back_translated_sentences.get(
+                    if USE_AUGMENTED:
+                        anchors_augmented = augmented_sentences.get(
                             sentence["sentence"]
                         )
                         if anchors_augmented is not None:
@@ -279,6 +150,12 @@ def main():
                         recommended_sentences_with_anchor,
                         len(positives) * len(anchors) * len(negatives),
                     )
+                    
+                    if max_sentences < recommended_sentences_with_anchor:
+                        logging.warning(
+                            f"Not enough combinations for lemma '{lemma}', meaning index {meaning_idx}. "
+                            f"Recommended: {recommended_sentences_with_anchor}, available: {max_sentences}."
+                        )
 
                     used = set()
 
@@ -316,23 +193,29 @@ def main():
 
 
 if __name__ == "__main__":
-    if USE_BACK_TRANSLATED:
-        back_translated_sentences = {}
-        print("Loading back-translated sentences...")
-        with open(BACK_TRANSLATION_PATH, "r", encoding="utf-8") as bt_file:
-            for line in bt_file:
-                item = json.loads(line)
-                back_translated_sentences[item["sentence"]] = item["augmented"]
+    random.seed(42)
 
-    if USE_DEFINITIONS_BACK_TRANSLATED:
-        definitions_back_translated_sentences = {}
-        print("Loading definitions back-translated sentences...")
-        with open(DEFINITIONS_BACK_TRANSLATION_PATH, "r", encoding="utf-8") as dbt_file:
-            for line in dbt_file:
-                item = json.loads(line)
-                definitions_back_translated_sentences[item["sentence"]] = item[
-                    "augmented"
-                ]
+    if USE_AUGMENTED:
+        augmented_sentences = defaultdict(list)
+
+        print("Loading augmented sentences...")
+        for path in AUGMENTATION_PATHS:
+            with open(path, "r", encoding="utf-8") as bt_file:
+                for line in bt_file:
+                    item = json.loads(line)
+                    augmented_sentences[item["sentence"]].extend(item["augmented"])
+
+    if USE_DEFINITIONS_AUGMENTED:
+        definitions_augmented_sentences = defaultdict(list)
+
+        print("Loading definitions augmented sentences...")
+        for path in DEFINITIONS_AUGMENTATION_PATHS:
+            with open(path, "r", encoding="utf-8") as dbt_file:
+                for line in dbt_file:
+                    item = json.loads(line)
+                    definitions_augmented_sentences[item["sentence"]].extend(
+                        item["augmented"]
+                    )
 
     print("Loading NLP models...")
     spacy_nlp = spacy.load("uk_core_news_sm", enable=["lemmatizer"])

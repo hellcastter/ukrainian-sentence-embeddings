@@ -11,14 +11,10 @@ from services.prediction_strategies import PredictionStrategy
 from services.config import PATH_TO_SOURCE_UDPIPE, SUM_14_PATH, SUM_12_PATH
 from services.utils_results import prediction_accuracy
 
-
 from transformers import AutoTokenizer, AutoModel
 
-# MODEL_TOKENIZER_PATH = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-# MODEL_PATH="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-
-# MODEL_TOKENIZER_PATH = "intfloat/multilingual-e5-large"
-# MODEL_PATH = "models/fine-tuned-models/model_dp0m7h33_final"
+MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_u9l23623_best"
+MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_u9l23623_final"
 
 DEVICE = "cuda"  # or "cpu"
 
@@ -27,17 +23,21 @@ def evaluate_wsd(
     model_path: str,
     model_tokenizer_path: str | None = None,
     verbose: bool = True,
-    sum_path: str = SUM_14_PATH
+    sum_path: str = SUM_14_PATH,
 ):
     if model_tokenizer_path is None:
         model_tokenizer_path = model_path
-    
+
     print("Loading evaluation dataset...")
     data = read_and_transform_data(sum_path, homonym=True)
 
     print("Loading fine-tuned model...")
-    tokenizer = AutoTokenizer.from_pretrained(model_tokenizer_path, trust_remote_code=True)
-    model = AutoModel.from_pretrained(model_path, output_hidden_states=True, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_tokenizer_path, trust_remote_code=True
+    )
+    model = AutoModel.from_pretrained(
+        model_path, output_hidden_states=True, trust_remote_code=True
+    )
     model = model.to(DEVICE).eval()
 
     print("Loading UDPipe model...")
@@ -56,16 +56,12 @@ def evaluate_wsd(
 
     if verbose:
         results_reports(evaluation_dataset_pd, udpipe_model)
-        
-    return prediction_accuracy(evaluation_dataset_pd) 
+
+    return prediction_accuracy(evaluation_dataset_pd)
 
 
 if __name__ == "__main__":
-    evaluate_wsd(
-        MODEL_PATH,
-        MODEL_TOKENIZER_PATH,
-        verbose=True
-    )
+    evaluate_wsd(MODEL_NAME_OR_PATH, MODEL_NAME_OR_PATH, verbose=True)
 
 
 # original model 0.701503

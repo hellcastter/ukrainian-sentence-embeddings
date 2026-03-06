@@ -1,5 +1,5 @@
 """
-Run: python3 -m augment.dropout.dropout
+Run: python3 -m augment.mask.mask
 """
 
 import logging
@@ -11,12 +11,12 @@ from services.udpipe_model import UDPipeModel
 from services.config import PATH_TO_SOURCE_UDPIPE
 
 from augment.common import TextDataset, ThreadedWriter
-from augment.dropout.dropouter import Dropouter
+from augment.mask.masker import Masker
 
 INPUT_TEXTS_PATH = (
     "local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json"
 )
-OUTPUT_TEXTS_PATH = "local_datasets/augmented/dropout/augmented_sentences.jsonl"
+OUTPUT_TEXTS_PATH = "local_datasets/augmented/mask/augmented_sentences.jsonl"
 
 BATCH_SIZE = 256
 NUM_WORKERS = 2
@@ -39,13 +39,18 @@ def main():
     writer = ThreadedWriter(OUTPUT_TEXTS_PATH)
 
     udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
-    shuffler = Dropouter(udpipe_model)
+    shuffler = Masker(
+        "Goader/modern-liberta-large",
+        udpipe=udpipe_model,
+        rate=0.15,
+        batch_size=128,
+    )
 
     try:
         logging.info("Dataset augmentation began")
 
         for batch in tqdm(dataloader, desc="Augmenting"):
-            augmented_texts = shuffler.augment(batch["sentence"], n=NUM_AUGMENTATIONS)
+            augmented_texts = shuffler(batch["sentence"], n=NUM_AUGMENTATIONS)
             writer.write(batch, augmented_texts)
 
         logging.info("Dataset augmentation finished")

@@ -1,9 +1,11 @@
 import math
 import random
+
 from services.udpipe_model import UDPipeModel
+from augment.common import Augmenter
 
 
-class TokenShuffler:
+class TokenShuffler(Augmenter):
     def __init__(self, udpipe_model: UDPipeModel, window_size=3):
         self.udpipe_model = udpipe_model
         self.window_size = window_size
@@ -20,19 +22,22 @@ class TokenShuffler:
 
     def _augment_sentence(self, sentence: str, n: int = 1):
         try:
-            tokenized = self.udpipe_model.tokenize(sentence)[0]
-            self.udpipe_model.tag(tokenized)
+            tokenized = self.udpipe_model.tokenize(sentence)
+            words = []
+            for tok in tokenized:
+                self.udpipe_model.tag(tok)
+                words.extend(tok.words[1:])
         except Exception as e:
             print(f"UDPipe failed to process sentence '{sentence}'")
             raise e
 
-        words = tokenized.words[1:]  # under 0 index is root
         augmented_sentences = []
 
         for _ in range(n):
             # shuffle only between punctuation to preserve sentence structure
             augmented_sentence = []
             current_sentence = []
+
             for word in words:
                 if word.upostag not in ["PUNCT"]:
                     current_sentence.append(word.form)
@@ -57,7 +62,7 @@ class TokenShuffler:
 
         return augmented_sentences
 
-    def augment(self, sentences: list[str], n: int = 1):
+    def __call__(self, sentences: list[str], n: int = 1) -> dict[str, list[str]]:
         """Augment sentences by shuffling tokens within a window.
 
         Args:
@@ -65,9 +70,9 @@ class TokenShuffler:
             n (int, optional): number of augmentations per sentence. Defaults to 1.
         """
 
-        augmented_sentences = []
+        augmented_sentences = {}
         for sentence in sentences:
-            augmented_sentences.extend(self._augment_sentence(sentence, n))
+            augmented_sentences[sentence] = self._augment_sentence(sentence, n)
 
         return augmented_sentences
 
@@ -80,5 +85,5 @@ if __name__ == "__main__":
 
     # Example usage
     sentence = "Він був дуже щасливий, коли отримав цю новину."
-    augmented = shuffler.augment([sentence], n=5)
+    augmented = shuffler([sentence], n=5)
     print(augmented)

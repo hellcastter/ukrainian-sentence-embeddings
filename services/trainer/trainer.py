@@ -79,10 +79,14 @@ class ContrastiveModel(nn.Module):
 
 # TODO: add logging to the class Trainer
 class Trainer:
-    def __init__(self, config: str):
+    def __init__(self, config: str, device=None):
         self.config = TrainingConfig.from_config(config)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = (
+            torch.device(device)
+            if device
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
         self.use_amp = self.device.type == "cuda"
         self.scaler = GradScaler(device=self.device.type, enabled=self.use_amp)
 
@@ -224,7 +228,7 @@ class Trainer:
             train_df=train_df,
             eval_df=eval_df,
         )
-        
+
         if self.config.log_to_wandb:
             # update dataset sizes in wandb config
             self.wandb_run.config.update(
@@ -251,6 +255,7 @@ class Trainer:
             tokenizer=self.tokenizer,
             pooling_strategy=PoolingStrategy.mean_pooling,
             prediction_strategy=PredictionStrategy.all_examples_to_one_embedding,
+            device=self.device,
         )
 
         eval_data = word_sense_detector.run()
@@ -407,6 +412,7 @@ class Trainer:
                 model_path=model_name,
                 model_tokenizer_path=self.config.tokenizer_name,
                 verbose=True,
+                device=self.device,
             )
 
             # log final WSD accuracy to W&B if enabled
@@ -417,10 +423,22 @@ class Trainer:
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Fine-tune a model for WSD")
-    parser.add_argument("--config", type=str, default="services/trainer/fine_tuning_config.ini", help="Path to the training config file")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="services/trainer/fine_tuning_config.ini",
+        help="Path to the training config file",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device to train on (e.g., 'cuda:0' or 'cpu'). Defaults to auto-detect.",
+    )
     args = parser.parse_args()
     config_path = args.config
 
-    model_trainer = Trainer(config_path)
+    model_trainer = Trainer(config_path, device=args.device)
     model_trainer.train()

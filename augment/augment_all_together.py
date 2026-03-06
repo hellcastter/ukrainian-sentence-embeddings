@@ -1,0 +1,125 @@
+"""
+Run: python3 -m augment.augment_all_together
+"""
+
+import json
+import random
+import logging
+
+from tqdm import tqdm
+from torch.utils.data import DataLoader
+
+from services.udpipe_model import UDPipeModel
+from services.config import PATH_TO_SOURCE_UDPIPE
+
+from augment.common import TextDataset, ThreadedWriter
+from augment.dropout.dropouter import Dropouter
+from augment.token_shuffling.token_shuffler import TokenShuffler
+from augment.mask.masker import Masker
+from augment.translation.back_translator import (
+    BackTranslator,
+    HelsinkiCTranslateTranslator,
+)
+from augment.common import markov_process
+
+
+INPUT_TEXTS_PATH = (
+    "local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json"
+)
+OUTPUT_TEXTS_PATH = "local_datasets/augmented/all_together/augmented_sentences_3.jsonl"
+
+BATCH_SIZE = 128
+NUM_WORKERS = 2
+NUM_AUGMENTATIONS = 9
+MARKOV_P = 0.75
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    force=True,
+)
+
+random.seed(42)
+
+
+def main():
+    texts_dataset = TextDataset(INPUT_TEXTS_PATH)
+    dataloader = DataLoader(
+        texts_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS
+    )
+
+    # Open file for writing results immediately
+    writer = ThreadedWriter(OUTPUT_TEXTS_PATH)
+
+    udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
+    shuffler = Dropouter(udpipe_model)
+    token_shuffler = TokenShuffler(udpipe_model)
+    masker = Masker("Goader/modern-liberta-large", udpipe_model, batch_size=1024)
+    pivot1 = HelsinkiCTranslateTranslator(
+        "models/translators/opus-mt-zle-en-ct2",
+        "Helsinki-NLP/opus-mt-tc-big-zle-en",
+        device="cuda",
+        device_index=[0],
+    )
+
+    pivot2 = HelsinkiCTranslateTranslator(
+        "models/translators/opus-mt-en-zle-ct2",
+        "Helsinki-NLP/opus-mt-tc-big-en-zle",
+        device="cuda",
+        device_index=[0],
+    )
+
+    translator = BackTranslator(
+        pivot_models=[pivot1, pivot2], languages=[("uk", "en"), ("en", "uk")]
+    )
+
+    all_augmenters = [shuffler, token_shuffler, masker, translator]
+
+    selected_augmenters = []
+
+    try:
+        logging.info("Dataset augmentation began")
+
+        for batch in tqdm(dataloader, desc="Augmenting"):
+            augmented_texts = batch["sentence"]
+            map_to_original = {text: text for text in augmented_texts}
+            final_augmented_texts = None
+
+            augmenters_list = []
+            while augmenter := markov_process(
+                all_augmenters, p=MARKOV_P, prev_augs_count=len(augmenters_list)
+            ):
+                augmenters_list.append(augmenter.__class__.__name__)
+                new_augmented_texts = augmenter(
+                    augmented_texts,
+                    n=1 if len(augmenters_list) >= 2 else NUM_AUGMENTATIONS,
+                )
+                augmented_texts = []
+
+                # reset final_augmented_texts for the next augmenter
+                final_augmented_texts = {}
+                for original, augmented_list in new_augmented_texts.items():
+                    augmented_list = list(
+                        filter(None, augmented_list)
+                    )  # filter out empty values
+                    augmented_texts.extend(augmented_list)
+
+                    original = map_to_original[original]
+                    final_augmented_texts[original] = augmented_list
+
+                    map_to_original.update({aug: original for aug in augmented_list})
+
+            writer.write(batch, final_augmented_texts)
+            selected_augmenters.append(augmenters_list)
+
+        logging.info("Dataset augmentation finished")
+    finally:
+        logging.info("Closing writer. Waiting for all data to be written...")
+        writer.close()
+
+        with open("selected_augmenters_log.json", "w") as f:
+            json.dump(selected_augmenters, f, indent=4)
+
+
+if __name__ == "__main__":
+    main()

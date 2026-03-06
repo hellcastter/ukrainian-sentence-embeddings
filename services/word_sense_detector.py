@@ -14,13 +14,19 @@ class WordSenseDetector:
         evaluation_dataset,
         pooling_strategy,
         prediction_strategy,
+        device: torch.device = None,
         **kwargs
     ):
-        # TODO create doc-string especially for describing prediction_strategy
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device is not None:
+            self.device = device
+        else:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        # TODO create doc-string especially for describing prediction_strategy
         if isinstance(pretrained_model, str):
-            self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model, trust_remote_code=True)
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                pretrained_model, trust_remote_code=True
+            )
             self.model = AutoModel.from_pretrained(
                 pretrained_model, output_hidden_states=True, trust_remote_code=True
             ).to(self.device)

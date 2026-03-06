@@ -1,6 +1,7 @@
 import json
 import os
 import queue
+import random
 import threading
 
 from torch.utils.data import Dataset
@@ -9,18 +10,33 @@ from services.udpipe_model import UDPipeModel
 from services.utils_embedding_calculation_v2 import _find_target_word_in_sentence
 from services.config import PATH_TO_SOURCE_UDPIPE
 
+from abc import ABC, abstractmethod
+
+
+class Augmenter(ABC):
+    @abstractmethod
+    def __call__(self, sentences: list[str], n: int = 1) -> dict[str, list[str]]:
+        pass
+
 
 class TextDataset(Dataset):
-    def __init__(self, texts_file: str, last_sentence: str = None, load_definitions=False):
+    def __init__(
+        self, texts_file: str, last_sentence: str = None, load_definitions=False
+    ):
         with open(texts_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         self.texts = []
-        
+
         if load_definitions:
             for lemma, meanings in data.items():
                 for meaning in meanings.values():
-                    self.texts.extend([{"lemma": lemma, "sentence": gl} for gl in meaning["meaning"]["gloss"]])
+                    self.texts.extend(
+                        [
+                            {"lemma": lemma, "sentence": gl}
+                            for gl in meaning["meaning"]["gloss"]
+                        ]
+                    )
         else:
             for lemma, meanings in data.items():
                 for meaning in meanings.values():
@@ -59,7 +75,7 @@ class ThreadedWriter:
         self.finished = False
         self.thread = threading.Thread(target=self._write_loop, daemon=True)
         self.include_target_word_check = include_target_word_check
-        
+
         if include_target_word_check:
             self.udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
 
@@ -74,18 +90,27 @@ class ThreadedWriter:
                 batch, augmented = self.queue.get(timeout=1)
                 # Write chunk at once to minimize disk syscalls
                 write_strs = []
-                augmented_per_original = len(augmented) // len(batch["sentence"])
 
-                for i, (lemma, sentence) in enumerate(
-                    zip(batch["lemma"], batch["sentence"])
-                ):
-                    augmented_texts = set(
-                        augmented[
-                            i
-                            * augmented_per_original : (i + 1)
-                            * augmented_per_original
-                        ]
-                    )
+                # reform the batch
+                original_sentences_dict = {}
+                for sentence, lemma in zip(batch["sentence"], batch["lemma"]):
+                    try:
+                        augmented_sentences = set(augmented[sentence])
+                        original_sentences_dict[sentence] = {
+                            "lemma": lemma,
+                            "augmented": augmented_sentences,
+                        }
+                    except KeyError:
+                        print(f"No augmented sentences for '{sentence}'")
+                        original_sentences_dict[sentence] = {
+                            "lemma": lemma,
+                            "augmented": [],
+                        }
+
+                for sentence in original_sentences_dict:
+                    lemma = original_sentences_dict[sentence]["lemma"]
+                    augmented_texts = original_sentences_dict[sentence]["augmented"]
+
                     augmented_texts = [
                         i
                         for i in augmented_texts
@@ -116,9 +141,29 @@ class ThreadedWriter:
                 self.queue.task_done()
             except queue.Empty:
                 continue
+            except Exception as e:
+                print(f"Error in writing thread: {e}")
+                continue
 
         self.f.close()
 
     def close(self):
         self.finished = True
         self.thread.join()
+
+
+def markov_process(
+    augmenters: list[Augmenter], p=0.5, prev_augs_count=0, min_augs=1
+) -> Augmenter | None:
+    """
+    Randomly selects one of the augmenters based on predefined probabilities.
+    Returns the selected augmenter or None if no augmenter is selected.
+    """
+    if not augmenters:
+        return None
+
+    # allow stopping only after reaching minimum
+    if prev_augs_count >= min_augs and random.random() < p:
+        return None
+
+    return random.choice(augmenters)

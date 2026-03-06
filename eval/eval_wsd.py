@@ -2,6 +2,8 @@
 Run: python3 -m eval.eval_wsd
 """
 
+import logging
+
 from services.poolings import PoolingStrategy
 from services.udpipe_model import UDPipeModel
 from services.utils_results import results_reports
@@ -11,12 +13,23 @@ from services.prediction_strategies import PredictionStrategy
 from services.config import PATH_TO_SOURCE_UDPIPE, SUM_14_PATH, SUM_12_PATH
 from services.utils_results import prediction_accuracy
 
+import torch
 from transformers import AutoTokenizer, AutoModel
 
-MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_u9l23623_best"
-MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_u9l23623_final"
+MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_xwzpoedx_best"
+MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_xwzpoedx_final"
 
 DEVICE = "cuda"  # or "cpu"
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler("eval_wsd.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 def evaluate_wsd(
@@ -24,26 +37,27 @@ def evaluate_wsd(
     model_tokenizer_path: str | None = None,
     verbose: bool = True,
     sum_path: str = SUM_14_PATH,
+    device: str = DEVICE,
 ):
     if model_tokenizer_path is None:
         model_tokenizer_path = model_path
 
-    print("Loading evaluation dataset...")
+    logger.info("Loading evaluation dataset...")
     data = read_and_transform_data(sum_path, homonym=True)
 
-    print("Loading fine-tuned model...")
+    logger.info("Loading fine-tuned model...")
     tokenizer = AutoTokenizer.from_pretrained(
         model_tokenizer_path, trust_remote_code=True
     )
     model = AutoModel.from_pretrained(
         model_path, output_hidden_states=True, trust_remote_code=True
     )
-    model = model.to(DEVICE).eval()
+    model = model.to(device).eval()
 
-    print("Loading UDPipe model...")
+    logger.info("Loading UDPipe model...")
     udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
 
-    print("Running Word Sense Detection...")
+    logger.info("Running Word Sense Detection...")
     word_sense_detector = WordSenseDetector(
         pretrained_model=model,
         tokenizer=tokenizer,
@@ -51,6 +65,7 @@ def evaluate_wsd(
         evaluation_dataset=data,
         pooling_strategy=PoolingStrategy.mean_pooling,
         prediction_strategy=PredictionStrategy.max_sim_across_all_examples,
+        device = torch.device(device),
     )
     evaluation_dataset_pd = word_sense_detector.run()
 

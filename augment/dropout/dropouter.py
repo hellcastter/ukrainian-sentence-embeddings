@@ -1,21 +1,26 @@
 import random
+
 from services.udpipe_model import UDPipeModel
+from augment.common import Augmenter
 
 
-class Dropouter:
+class Dropouter(Augmenter):
     def __init__(self, udpipe_model: UDPipeModel, rate=0.15):
         self.udpipe_model = udpipe_model
         self.rate = rate
 
     def _augment_sentence(self, sentence: str, n: int = 1):
         try:
-            tokenized = self.udpipe_model.tokenize(sentence)[0]
-            self.udpipe_model.tag(tokenized)
+            tokenized = self.udpipe_model.tokenize(sentence)
+            words = []
+            for tok in tokenized:
+                self.udpipe_model.tag(tok)
+                words.extend(tok.words[1:])
+
         except Exception as e:
             print(f"UDPipe failed to process sentence '{sentence}'")
             raise e
 
-        words = tokenized.words[1:]  # under 0 index is root
         augmented_sentences = []
 
         for _ in range(n):
@@ -35,17 +40,16 @@ class Dropouter:
 
         return augmented_sentences
 
-    def augment(self, sentences: list[str], n: int = 1):
+    def __call__(self, sentences: list[str], n: int = 1) -> dict[str, list[str]]:
         """Augment sentences by dropping tokens.
 
         Args:
             sentences (list[str]): batch of sentences to augment
             n (int, optional): number of augmentations per sentence. Defaults to 1.
         """
-
-        augmented_sentences = []
+        augmented_sentences = {}
         for sentence in sentences:
-            augmented_sentences.extend(self._augment_sentence(sentence, n))
+            augmented_sentences[sentence] = self._augment_sentence(sentence, n)
 
         return augmented_sentences
 
@@ -54,9 +58,19 @@ if __name__ == "__main__":
     from services.config import PATH_TO_SOURCE_UDPIPE
 
     udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
-    shuffler = Dropouter(udpipe_model, rate=0.15)
+    dropouter = Dropouter(udpipe_model, rate=0.15)
 
     # Example usage
-    sentence = "Він був дуже щасливий, коли отримав цю новину."
-    augmented = shuffler.augment([sentence], n=5)
-    print(augmented)
+    sentences = [
+        "Він був дуже щасливий, коли отримав цю новину.",
+        "Але іноді життя підкидає несподіванки, які змінюють наші плани.",
+    ]
+    augmented = dropouter(sentences, n=5)
+
+    for original, augs in augmented.items():
+        print(f"Original: {original}")
+        for i, aug in enumerate(augs, 1):
+            print(f"\tAugmentation {i}: {aug}")
+        print()
+
+# python3 -m augment.dropout.dropouter

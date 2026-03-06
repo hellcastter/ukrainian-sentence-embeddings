@@ -87,7 +87,7 @@ def main():
 
     try:
         for batch in tqdm(dataloader, desc="Augmenting"):
-            augmented_texts = translator.augment(batch["sentence"], n=NUM_AUGMENTATIONS)
+            augmented_texts = translator(batch["sentence"], n=NUM_AUGMENTATIONS)
             writer.write(batch, augmented_texts)
     finally:
         writer.close()

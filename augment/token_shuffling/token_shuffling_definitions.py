@@ -47,7 +47,7 @@ def main():
         logging.info("Dataset augmentation began")
 
         for batch in tqdm(dataloader, desc="Augmenting"):
-            augmented_texts = shuffler.augment(batch["sentence"], n=NUM_AUGMENTATIONS)
+            augmented_texts = shuffler(batch["sentence"], n=NUM_AUGMENTATIONS)
             writer.write(batch, augmented_texts)
 
         logging.info("Dataset augmentation finished")

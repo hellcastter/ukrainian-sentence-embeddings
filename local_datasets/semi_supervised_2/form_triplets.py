@@ -30,23 +30,25 @@ DATASET_PATH = (
     "local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json"
 )
 OUTPUT_CSV = (
-    "local_datasets/semi_supervised_2/triplets_semi_supervised_dropout.csv"
+    "local_datasets/semi_supervised_2/triplets_semi_supervised_all_augs_mixed_300.csv"
 )
 TOKENIZER = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 AUGMENTATION_PATHS = (
-    # "local_datasets/augmented/token_shuffling/augmented_sentences.jsonl",
-    # "local_datasets/augmented/translation/augmented_sentences_translated_v3.jsonl",
+    "local_datasets/augmented/token_shuffling/augmented_sentences.jsonl",
+    "local_datasets/augmented/translation/augmented_sentences_translated_v3.jsonl",
     "local_datasets/augmented/dropout/augmented_sentences.jsonl",
-    
+    "local_datasets/augmented/mask/augmented_sentences.jsonl",
+    # "local_datasets/augmented/all_together/augmented_sentences_3.jsonl",
 )
 DEFINITIONS_AUGMENTATION_PATHS = (
-    # "local_datasets/augmented/token_shuffling/augmented_sentences_definitions.jsonl",
-    # "local_datasets/augmented/translation/augmented_sentences_translated_definitions.jsonl",
+    "local_datasets/augmented/token_shuffling/augmented_sentences_definitions.jsonl",
+    "local_datasets/augmented/translation/augmented_sentences_translated_definitions.jsonl",
     "local_datasets/augmented/dropout/augmented_sentences_definitions.jsonl",
-    
+    "local_datasets/augmented/mask/augmented_sentences_definitions.jsonl",
+    # "local_datasets/augmented/all_together/augmented_sentences_definitions_3.jsonl",
 )
 
-MAX_SENTENCES_PER_MEANING = 50
+MAX_SENTENCES_PER_MEANING = 300
 USE_AUGMENTED = True
 USE_DEFINITIONS_AUGMENTED = True
 
@@ -146,25 +148,33 @@ def main():
 
                     anchors = list(anchors)
 
+                    theoretical_max_sentences_with_anchor = (
+                        len(positives) * len(anchors) * len(negatives)
+                    )
                     max_sentences = min(
                         recommended_sentences_with_anchor,
-                        len(positives) * len(anchors) * len(negatives),
+                        theoretical_max_sentences_with_anchor,
                     )
-                    
-                    if max_sentences < recommended_sentences_with_anchor:
-                        logging.warning(
-                            f"Not enough combinations for lemma '{lemma}', meaning index {meaning_idx}. "
-                            f"Recommended: {recommended_sentences_with_anchor}, available: {max_sentences}."
-                        )
+
+                    # if max_sentences < recommended_sentences_with_anchor:
+                    #     logging.warning(
+                    #         f"Not enough combinations for lemma '{lemma}', meaning index {meaning_idx}. "
+                    #         f"Recommended: {recommended_sentences_with_anchor}, available: {max_sentences}."
+                    #     )
 
                     used = set()
 
-                    for _ in range(max_sentences):
+                    # for _ in range(max_sentences):
+                    for _ in range(recommended_sentences_with_anchor):
                         positive = random.choice(positives)
                         anchor = random.choice(anchors)
                         negative = random.choice(negatives)
 
-                        while (anchor, positive, negative) in used:
+                        # firstly try all unique combinations,
+                        # then allow repeats if we haven't reached the recommended number of sentences with the same anchor
+                        while (anchor, positive, negative) in used and len(
+                            used
+                        ) < theoretical_max_sentences_with_anchor:
                             positive = random.choice(positives)
                             anchor = random.choice(anchors)
                             negative = random.choice(negatives)
@@ -190,6 +200,7 @@ def main():
                         }
 
                         writer.writerow(row)
+                        
 
 
 if __name__ == "__main__":
@@ -198,7 +209,7 @@ if __name__ == "__main__":
     if USE_AUGMENTED:
         augmented_sentences = defaultdict(list)
 
-        print("Loading augmented sentences...")
+        logging.info("Loading augmented sentences...")
         for path in AUGMENTATION_PATHS:
             with open(path, "r", encoding="utf-8") as bt_file:
                 for line in bt_file:
@@ -208,7 +219,7 @@ if __name__ == "__main__":
     if USE_DEFINITIONS_AUGMENTED:
         definitions_augmented_sentences = defaultdict(list)
 
-        print("Loading definitions augmented sentences...")
+        logging.info("Loading definitions augmented sentences...")
         for path in DEFINITIONS_AUGMENTATION_PATHS:
             with open(path, "r", encoding="utf-8") as dbt_file:
                 for line in dbt_file:
@@ -217,7 +228,7 @@ if __name__ == "__main__":
                         item["augmented"]
                     )
 
-    print("Loading NLP models...")
+    logging.info("Loading NLP models...")
     spacy_nlp = spacy.load("uk_core_news_sm", enable=["lemmatizer"])
     udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER)

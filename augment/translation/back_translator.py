@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
 from typing import List, Union
+import logging
 
 import torch
 import sentencepiece as spm
 from ctranslate2 import Translator as CT2Translator
 from transformers import AutoModelForSeq2SeqLM, MarianTokenizer, AutoTokenizer, pipeline
+
+from augment.common import Augmenter
 
 
 class Translator(ABC):
@@ -165,7 +168,7 @@ class NLLB200TransformersTranslator(Translator):
         return translated_text
 
 
-class BackTranslator:
+class BackTranslator(Augmenter):
     def __init__(
         self,
         pivot_models: list[Translator],
@@ -185,23 +188,32 @@ class BackTranslator:
         self.languages = languages
 
     @torch.no_grad()
-    def augment(self, texts: Union[str, List[str]], n: int = 1):
+    def __call__(
+        self, texts: Union[str, List[str]], n: int = 1
+    ) -> dict[str, list[str]]:
         if isinstance(texts, str):
             texts = [texts]
-            
+
+        texts = list(texts)
+
         sentences_per_translation = int(n ** (1 / (len(self.translators))))
         total_sentences = sentences_per_translation ** len(self.translators)
-        
+
         if total_sentences != n:
-            print(
+            logging.warning(
                 f"Warning: The requested number of augmentations {n} cannot be evenly distributed across {len(self.translators)} translators. "
                 f"Using {total_sentences} augmentations instead. "
-                f"Try using n={total_sentences} or n={sentences_per_translation ** (len(self.translators) - 1)}."
+                f"Try using n={total_sentences} or n={sentences_per_translation ** (len(self.translators) + 1)}."
             )
 
         # Subsequent models process those variations 1-to-1
         # This keeps the total count at (Input Batch Size * n)
-        for translator, langs in zip(self.translators, self.languages):
+        augmented_texts = {text: [] for text in texts}  # for final output
+        original_texts = texts[:]
+
+        for n_translation, (translator, langs) in enumerate(
+            zip(self.translators, self.languages)
+        ):
             texts = translator.translate(
                 texts,
                 languages=langs,
@@ -210,4 +222,47 @@ class BackTranslator:
                 **self.gen_kwargs,
             )
 
-        return texts
+            if n_translation != len(self.translators) - 1:
+                continue
+
+            ## Group translations back to original sentences
+            n_sentences_per_original = total_sentences
+
+            for i in range(0, len(texts), n_sentences_per_original):
+                original = original_texts[i // n_sentences_per_original]
+                augmented_sentences = texts[i : i + n_sentences_per_original]
+
+                # Final translations go to the output
+                augmented_texts[original].extend(augmented_sentences)
+
+        return augmented_texts
+
+
+if __name__ == "__main__":
+    # Example usage
+    pivot1 = HelsinkiCTranslateTranslator(
+        "models/translators/opus-mt-zle-en-ct2",
+        "Helsinki-NLP/opus-mt-tc-big-zle-en",
+        device="cuda",
+        device_index=[0],
+    )
+
+    pivot2 = HelsinkiCTranslateTranslator(
+        "models/translators/opus-mt-en-zle-ct2",
+        "Helsinki-NLP/opus-mt-tc-big-en-zle",
+        device="cuda",
+        device_index=[0],
+    )
+
+    translator = BackTranslator(
+        pivot_models=[pivot1, pivot2], languages=[("uk", "en"), ("en", "uk")]
+    )
+
+    sentence = [
+        "Він був дуже щасливий, коли отримав цю новину.",
+        "Це був найкращий день у його житті!",
+    ]
+    augmented = translator(sentence, n=4)
+    print(augmented)
+
+# python3 -m augment.translation.back_translator

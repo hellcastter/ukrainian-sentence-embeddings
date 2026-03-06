@@ -29,6 +29,7 @@ eval/mteb_*
 # loggers
 .neptune/
 wandb/
+logs/
 
 # keep some files
 !.gitignore

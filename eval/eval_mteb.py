@@ -22,17 +22,24 @@ NUM_PROC = 8
 
 CASE = 1
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
+)
 
 
 models = [
     # base models
     "lang-uk/ukr-paraphrase-multilingual-mpnet-base",
     "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+    "intfloat/multilingual-e5-large-instruct",
+    "intfloat/multilingual-e5-large",
+    "models/fine-tuned-models/model_jbmdzvv6_final",
+    "models/fine-tuned-models/model_ksqah5x7_final",
+    
 ]
-DEVICE = None
- 
-if CASE == 0:   
+DEVICE = "cuda:0"
+
+if CASE == 0:
     # pool targets: true
     models.extend([
         "models/fine-tuned-models/model_p1l04h2q_final",
@@ -46,7 +53,7 @@ if CASE == 0:
         "models/fine-tuned-models/model_r4z3fy8z_final",
         "models/fine-tuned-models/model_vbngi6nk_final",
         "models/fine-tuned-models/model_eo7hmwqv_final"
-        
+
     ])
     DEVICE = "cuda:0"
 elif CASE == 1:

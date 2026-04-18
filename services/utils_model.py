@@ -20,7 +20,7 @@ def _get_model_output(model, tokenized_input_text):
 
 
 def _tokenize_text(tokenizer, input_text, device):
-    return tokenizer(input_text, return_tensors='pt').to(device)
+    return tokenizer(input_text, return_tensors='pt', truncation=True).to(device)
 
 
 def run_inference(model, tokenizer, text, device):

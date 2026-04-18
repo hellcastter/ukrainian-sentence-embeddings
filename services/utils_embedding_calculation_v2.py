@@ -1,5 +1,6 @@
 from services.utils_model import run_inference
 from collections import Counter
+from services.udpipe_model import UDPipeModel
 
 import spacy
 
@@ -57,40 +58,42 @@ def same_lemma(a: str, b: str) -> bool:
     return False
 
 
-def _find_target_word_in_sentence(udpipe_model, input_text: str, target_word: str):
+def lemmatize_word(word: str, model: UDPipeModel | spacy.Language) -> str:
+    is_spacy = isinstance(model, spacy.Language)
+
+    if is_spacy:
+        doc = model(word)
+        return "".join([t.lemma_.lower() for t in doc])
+    else:
+        tokenized = model.tokenize(word)
+        model.tag(tokenized[0])
+        return "".join([w.lemma.lower() for w in tokenized[0].words[1:]])
+
+def iterate_sentence(text: str, model: UDPipeModel | spacy.Language):
+    is_spacy = isinstance(model, spacy.Language)
+    if is_spacy:
+        doc = model(text)
+        for token in doc:
+            yield token.text, token.lemma_.lower()
+    else:
+        tokenized = model.tokenize(text)
+        for sent in tokenized:
+            model.tag(sent)
+            for w in sent.words[1:]:  # skip root
+                yield w.form, w.lemma.lower()
+
+def _find_target_word_in_sentence(model: UDPipeModel | spacy.Language, input_text: str, target_word: str):
     target_word = target_word.strip().lower()
 
     try:
-        tokenized = udpipe_model.tokenize(target_word)
-        udpipe_model.tag(tokenized[0])
-        target_word_lemma = "".join([i.lemma.lower() for i in tokenized[0].words[1:]])
+        target_word_lemma = lemmatize_word(target_word, model)
     except Exception as e:
-        print(f"UDPipe failed to lemmatize target word '{target_word}'")
+        print(f"Lemmatization failed for '{target_word}'")
         raise e
 
-    tokenized = udpipe_model.tokenize(input_text)
-    for tok_sent in tokenized:
-        udpipe_model.tag(tok_sent)
-
-        for word_index, w in enumerate(tok_sent.words[1:]):  # under 0 index is root
-            token_lemma = w.lemma.lower()
-
-            if same_lemma(target_word, token_lemma) or same_lemma(
-                target_word_lemma, token_lemma
-            ):
-                return tok_sent.words[word_index + 1].form
-
-    # use spacy as fallback
-    target_word_lemma = "".join([i.lemma_.lower() for i in spacy_nlp(target_word)])
-
-    doc = spacy_nlp(input_text)
-    for token in doc:
-        token_lemma = token.lemma_.lower()
-
-        if same_lemma(target_word, token_lemma) or same_lemma(
-            target_word_lemma, token_lemma
-        ):
-            return token.text
+    for token_text, token_lemma in iterate_sentence(input_text, model):
+        if same_lemma(target_word, token_lemma) or same_lemma(target_word_lemma, token_lemma):
+            return token_text
 
     return None
 

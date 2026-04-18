@@ -3,6 +3,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from tqdm import tqdm
+
 # from services.utils_embedding_calculation import (
 #     get_target_word_embedding,
 #     get_context_embedding,

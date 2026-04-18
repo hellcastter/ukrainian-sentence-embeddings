@@ -198,7 +198,7 @@ def read_and_transform_data(
     data = fix_vocabulary_patterns(data)
 
     data = drop_duplicates(data)
-    
+
     if homonym:
         data = (
             data.groupby(["lemma", "order"])
@@ -206,7 +206,7 @@ def read_and_transform_data(
             .reset_index()
             .drop(columns=["order"])
         )
-        
+
     else:
         data["gloss"] = data.gloss.apply(lambda x: [x])
 

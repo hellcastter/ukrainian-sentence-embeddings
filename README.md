@@ -246,23 +246,10 @@ Edit the model path, target lemma, and input sentences at the top of `demo.py` t
 
 ---
 
-## ⚡ Fast Path
-
-If prepared triplets already exist in `local_datasets/semi_supervised_2/`, skip Stages A–D and run:
-
-```bash
-python3 -m services.trainer.trainer --config services/trainer/fine_tuning_config.ini --device cuda:0
-python3 -m eval.eval_wsd
-python3 -m eval.eval_mteb
-```
-
----
-
 ## Reproducibility Notes
 
 - Several scripts contain hardcoded paths and constants near the top of the file — review and update them before running on a new machine.
 - Files in `local_datasets/` include experimental variants from earlier iterations of the pipeline; they can be safely ignored unless you are investigating prior experiments.
-- Training results may vary slightly depending on GPU type, driver version, and library versions. Pinning dependencies mitigates this.
 
 ---
 

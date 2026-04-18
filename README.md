@@ -25,11 +25,12 @@ A research codebase for **Word Sense Disambiguation (WSD)** and **embedding fine
 ## Pipeline Overview
 
 ```mermaid
-A[🗂️ Collect Sentences] --> B[🏷️ Assign Meanings]
-B --> C[🔀 Augment Data]
-C --> D[📐 Build Triplets]
-D --> E[🏋️ Train Model]
-E --> F[📊 Evaluate]
+   graph LR
+     A[Collect Sentences] --> B[Assign Meanings]
+     B --> C[Augment]
+     C --> D[Build Triplets]
+     D --> E[Train]
+     E --> F[Evaluate]
 ```
 
 **What this repository does:**

@@ -100,13 +100,13 @@ def find_best_meaning(
 
 
 def main():
-    SUM_PATH = "./datasets_pre_defined/sum_14_final.jsonlines"
+    SUM_PATH = "./datasets_pre_defined/sum_final.jsonlines"
     MODEL_NAME = "victormuryn/mpnet-use-combined-pt"
     TARGET_LEMMA = "коса"
     DEVICE = "cuda:0"
     SENTENCES = [
         "Якраз під старою вишнею стояла дівчина, хороша, як зоря ясна; руса коса нижче пояса",
-        "Човен повернув за гострий ріг піскуватої коси і вступив у Чорне море"
+        "Човен повернув за гострий ріг піскуватої коси і вступив у Чорне море",
     ]
 
     pooling_strategy = PoolingStrategy.mean_pooling
@@ -125,7 +125,7 @@ def main():
             sentence,
             DEVICE,
         )
-            
+
         context, gloss, similarity = find_best_meaning(
             model,
             tokenizer,
@@ -137,7 +137,7 @@ def main():
 
         print("\n=== RESULT ===")
         print(f"Most likely meaning: {context}")
-        print(f"Gloss: \"{gloss}\"")
+        print(f'Gloss: "{gloss}"')
         print(f"Similarity: {similarity:.4f}")
         print()
 

@@ -16,7 +16,7 @@ from sentence_transformers import SentenceTransformer
 from services.utils_data import read_and_transform_data
 from services.config import (
     UNIQUE_LEMMAS_WITH_SENTENCES_FILE,
-    SUM_14_PATH,
+    SUM_PATH,
     EMBEDDER_MODEL,
 )
 
@@ -42,7 +42,7 @@ embedder = SentenceTransformer(EMBEDDER_MODEL, device=model_device)
 with open(UNIQUE_LEMMAS_WITH_SENTENCES_FILE, "r") as f:
     data = [json.loads(line) for line in f]
 
-sum_14 = read_and_transform_data(SUM_14_PATH, homonym=True)
+sum = read_and_transform_data(SUM_PATH, homonym=True)
 
 # storage
 lemmas_with_meanings_and_sentences = defaultdict(dict)
@@ -51,7 +51,7 @@ lemmas_with_meanings_and_sentences = defaultdict(dict)
 ## Helpers
 def process_lemma(lemma: str) -> list:
     # find and process lemma in SUM
-    meanings = sum_14[sum_14["lemma"] == lemma]
+    meanings = sum[sum["lemma"] == lemma]
 
     # add meanings to storage even if no sentences are found later
     for meaning in meanings.itertuples():
@@ -154,7 +154,7 @@ def process_lemma(lemma: str) -> list:
 
 
 def main():
-    lemmas = sum_14["lemma"].unique()
+    lemmas = sum["lemma"].unique()
 
     with open(MEANINGS_PATH, "w") as f:
         pbar = tqdm(lemmas, desc="Processing lemmas")
@@ -173,4 +173,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

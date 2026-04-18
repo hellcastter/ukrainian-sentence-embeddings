@@ -10,7 +10,7 @@ from services.utils_results import results_reports
 from services.utils_data import read_and_transform_data
 from services.word_sense_detector import WordSenseDetector
 from services.prediction_strategies import PredictionStrategy
-from services.config import PATH_TO_SOURCE_UDPIPE, SUM_14_PATH, SUM_12_PATH
+from services.config import PATH_TO_SOURCE_UDPIPE, SUM_PATH
 from services.utils_results import prediction_accuracy
 
 import torch
@@ -36,7 +36,7 @@ def evaluate_wsd(
     model_path: str,
     model_tokenizer_path: str | None = None,
     verbose: bool = True,
-    sum_path: str = SUM_14_PATH,
+    sum_path: str = SUM_PATH,
     device: str = DEVICE,
 ):
     if model_tokenizer_path is None:

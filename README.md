@@ -3,8 +3,11 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
 ![Status](https://img.shields.io/badge/status-research-orange)
+[![Hugging Face](https://img.shields.io/badge/🤗%20Hugging%20Face-Collection-yellow)](https://huggingface.co/collections/victormuryn/ukrainian-sentence-embeddings-use)
 
 A research codebase for **Word Sense Disambiguation (WSD)** and **embedding fine-tuning** for the Ukrainian language. The project builds lemma-centered datasets, augments them, trains contrastive models, and evaluates the resulting embeddings on WSD and MTEB-style benchmarks.
+
+> 🤗 Trained models are available in the [Ukrainian Sentence Embeddings (USE) collection](https://huggingface.co/collections/victormuryn/ukrainian-sentence-embeddings-use) on Hugging Face.
 
 ---
 

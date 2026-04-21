@@ -11,7 +11,6 @@ class TrainingConfig:
     
     # paths
     path_to_save_fine_tuned_model: str = "models/fine-tuned-models"
-    wsd_eval_path: str = "local_datasets/wsd_loss_data_homonyms_problematic.csv"
     
     # training
     train_data_path: str = "local_datasets/semi_supervised_2/triplets_semi_supervised.csv"

@@ -102,7 +102,7 @@ class Trainer:
         self._setup_data()
 
         self.train_avg_meter = AverageMeter("train_loss")
-        self.max_wsd_acc = 0
+        self.min_val_loss = float("inf")
         self.rounds_count = 0
 
         self._setup_optimizer()
@@ -239,14 +239,6 @@ class Trainer:
                 allow_val_change=True,
             )
 
-        # 3. Load WSD-specific evaluation data (The 'Ground Truth' for WSD tasks)
-        self.wsd_eval_df = pd.read_csv(self.config.wsd_eval_path)
-        # Applying your original parsing logic
-        self.wsd_eval_df["examples"] = self.wsd_eval_df["examples"].apply(literal_eval)
-        self.wsd_eval_df["gloss"] = self.wsd_eval_df["gloss"].apply(
-            lambda x: literal_eval(x) if x.startswith("[") else [x]
-        )
-
     def _calculate_wsd_accuracy(self, eval_data):
         word_sense_detector = WordSenseDetector(
             pretrained_model=self.model,
@@ -291,9 +283,6 @@ class Trainer:
 
         mean_eval_loss = eval_loss / len(self.eval_loader)
 
-        with autocast(self.device.type, dtype=torch.float16, enabled=self.use_amp):
-            wsd_acc = self._calculate_wsd_accuracy(self.wsd_eval_df)
-
         report_gpu()
 
         if self.config.log_to_wandb:
@@ -301,14 +290,13 @@ class Trainer:
             self.wandb_run.log(
                 {
                     "eval/loss": mean_eval_loss,
-                    "eval/wsd_acc": wsd_acc,
                     "epoch": epoch,
                 },
                 step=self.global_step,
             )
 
-        if wsd_acc > self.max_wsd_acc:
-            self.max_wsd_acc = wsd_acc
+        if eval_loss < self.min_val_loss:
+            self.min_val_loss = eval_loss
             self.rounds_count = 0
 
             if batch_count > 0:
@@ -323,8 +311,7 @@ class Trainer:
             {
                 "epoch": epoch,
                 "batch_count": batch_count,
-                "wsd_acc": wsd_acc,
-                "max_wsd_acc": self.max_wsd_acc,
+                "min_val_loss": self.min_val_loss,
                 "rounds_count": self.rounds_count,
             }
         )

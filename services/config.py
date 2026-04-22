@@ -50,5 +50,5 @@ PATH_TO_SAVE_TRIPLETS = "local_datasets/ubertext_triplets_6m_samples.csv"
 UNIQUE_LEMMAS_WITH_SENTENCES_FILE = (
     "local_datasets/raw_sentences/unique_lemma_sentences.jsonl"
 )
-SUM_PATH = "datasets_pre_defined/sum_final.jsonlines"
 SUM_PATH = "datasets_pre_defined/sum_fixed.jsonlines"
+SUM_PATH = "datasets_pre_defined/sum_final.jsonlines"

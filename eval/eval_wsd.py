@@ -17,7 +17,7 @@ import torch
 from transformers import AutoTokenizer, AutoModel
 
 MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_xwzpoedx_best"
-MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_xwzpoedx_final"
+MODEL_NAME_OR_PATH = "models/fine-tuned-models/model_sor6k453_final"
 
 DEVICE = "cuda"  # or "cpu"
 
@@ -104,4 +104,4 @@ if __name__ == "__main__":
 # -113_0 0.79972 (SENTENCES_PER_MEANING = 75, SENTENCES_WITH_ANCHOR = 2, USE_BACK_TRANSLATED = True, intfloat/multilingual-e5-large, new dataset formation)
 
 # -163_0 0.789934
-# -166_0 0.787836 (0.803842) (0.819805 on SUM12)
+# -166_0 0.787836 (0.803842) (0.819805)

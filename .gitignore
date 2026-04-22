@@ -30,6 +30,7 @@ eval/mteb_*
 .neptune/
 wandb/
 logs/
+*.log
 
 # keep some files
 !.gitignore

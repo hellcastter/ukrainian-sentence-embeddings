@@ -24,10 +24,7 @@ DEVICE = "cuda"  # or "cpu"
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO,
-    handlers=[
-        logging.FileHandler("eval_wsd.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler("eval_wsd.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
@@ -65,7 +62,7 @@ def evaluate_wsd(
         evaluation_dataset=data,
         pooling_strategy=PoolingStrategy.mean_pooling,
         prediction_strategy=PredictionStrategy.max_sim_across_all_examples,
-        device = torch.device(device),
+        device=torch.device(device),
     )
     evaluation_dataset_pd = word_sense_detector.run()
 

@@ -69,6 +69,7 @@ def lemmatize_word(word: str, model: UDPipeModel | spacy.Language) -> str:
         model.tag(tokenized[0])
         return "".join([w.lemma.lower() for w in tokenized[0].words[1:]])
 
+
 def iterate_sentence(text: str, model: UDPipeModel | spacy.Language):
     is_spacy = isinstance(model, spacy.Language)
     if is_spacy:
@@ -82,7 +83,10 @@ def iterate_sentence(text: str, model: UDPipeModel | spacy.Language):
             for w in sent.words[1:]:  # skip root
                 yield w.form, w.lemma.lower()
 
-def _find_target_word_in_sentence(model: UDPipeModel | spacy.Language, input_text: str, target_word: str):
+
+def _find_target_word_in_sentence(
+    model: UDPipeModel | spacy.Language, input_text: str, target_word: str
+):
     target_word = target_word.strip().lower()
 
     try:
@@ -92,7 +96,9 @@ def _find_target_word_in_sentence(model: UDPipeModel | spacy.Language, input_tex
         raise e
 
     for token_text, token_lemma in iterate_sentence(input_text, model):
-        if same_lemma(target_word, token_lemma) or same_lemma(target_word_lemma, token_lemma):
+        if same_lemma(target_word, token_lemma) or same_lemma(
+            target_word_lemma, token_lemma
+        ):
             return token_text
 
     return None

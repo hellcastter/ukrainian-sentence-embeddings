@@ -14,13 +14,14 @@ def _get_hidden_states(model_output):
 def get_last_hidden_state(hidden_states):
     return hidden_states[:, -1]
 
+
 @torch.no_grad()
 def _get_model_output(model, tokenized_input_text):
     return model(**tokenized_input_text)
 
 
 def _tokenize_text(tokenizer, input_text, device):
-    return tokenizer(input_text, return_tensors='pt', truncation=True).to(device)
+    return tokenizer(input_text, return_tensors="pt", truncation=True).to(device)
 
 
 def run_inference(model, tokenizer, text, device):

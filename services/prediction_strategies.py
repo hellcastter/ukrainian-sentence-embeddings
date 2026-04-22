@@ -5,11 +5,6 @@ import torch.nn.functional as F
 
 from tqdm import tqdm
 
-# from services.utils_embedding_calculation import (
-#     get_target_word_embedding,
-#     get_context_embedding,
-# )
-
 from services.utils_embedding_calculation_v2 import (
     get_target_word_embedding,
     get_context_embedding,

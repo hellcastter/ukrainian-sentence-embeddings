@@ -1,6 +1,7 @@
 import ufal.udpipe
 import logging
 
+
 class UDPipeModel:
     def __init__(self, path):
         """Load given model."""

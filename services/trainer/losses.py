@@ -88,9 +88,7 @@ class TripletLoss(nn.Module):
             return self._cosine_distance
 
     def forward(self, batch):
-        batch = {
-            k: v.to(self.device) for k, v in batch.items()
-        }
+        batch = {k: v.to(self.device) for k, v in batch.items()}
 
         a = self.model(
             batch["anchor_ids"], attention_mask=batch["anchor_mask"]

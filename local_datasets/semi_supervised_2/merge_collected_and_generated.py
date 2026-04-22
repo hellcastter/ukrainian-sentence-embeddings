@@ -6,6 +6,7 @@ COLLECTED_SENTENCES_PATH = (
 GENERATED_SENTENCES_PATH = "local_datasets/semi_supervised/generated_sentences.jsonl"
 OUTPUT_PATH = "local_datasets/semi_supervised/merged_collected_and_generated_2.json"
 
+
 def main():
     with open(COLLECTED_SENTENCES_PATH, "r", encoding="utf-8") as collected_file:
         collected_data = json.load(collected_file)

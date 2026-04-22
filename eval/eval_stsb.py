@@ -11,15 +11,15 @@ benchmark_hf = "anikol12/STSB-UK"
 # models = [
 #     "lang-uk/ukr-paraphrase-multilingual-mpnet-base",
 #     "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-    # "models/fine-tuned-models/model_7wd97f4o_final",
-    # "models/fine-tuned-models/model_u9l23623_final",
-    # "models/fine-tuned-models/model_pt0axf82_final",
-    # "models/fine-tuned-models/model_1ezktszs_final",
-    # "models/fine-tuned-models/model_ok0ia00j_final",
-    # "models/fine-tuned-models/model_rpwv6n2t_final",
-    # "models/fine-tuned-models/model_a3eh99hl_final",
-    # "models/fine-tuned-models/model_xwzpoedx_final",
-    # "models/fine-tuned-models/model_8099d7r8_final",
+# "models/fine-tuned-models/model_7wd97f4o_final",
+# "models/fine-tuned-models/model_u9l23623_final",
+# "models/fine-tuned-models/model_pt0axf82_final",
+# "models/fine-tuned-models/model_1ezktszs_final",
+# "models/fine-tuned-models/model_ok0ia00j_final",
+# "models/fine-tuned-models/model_rpwv6n2t_final",
+# "models/fine-tuned-models/model_a3eh99hl_final",
+# "models/fine-tuned-models/model_xwzpoedx_final",
+# "models/fine-tuned-models/model_8099d7r8_final",
 # ]
 
 # pool targets: true
@@ -37,6 +37,7 @@ models = [
     "models/fine-tuned-models/model_r4z3fy8z_final",
     "models/fine-tuned-models/model_vbngi6nk_final",
 ]
+
 
 def main():
     # load dataset
@@ -61,15 +62,19 @@ def main():
         model = SentenceTransformer(model_name_or_path)
         results = evaluator(model)
 
-        rows.append({
-            "model": model_name_or_path,
-            "pearson_cosine": results["pearson_cosine"] * 100,
-            "spearman_cosine": results["spearman_cosine"] * 100,
-        })
+        rows.append(
+            {
+                "model": model_name_or_path,
+                "pearson_cosine": results["pearson_cosine"] * 100,
+                "spearman_cosine": results["spearman_cosine"] * 100,
+            }
+        )
 
     # ✅ build table
-    df = pd.DataFrame(rows).set_index("model").sort_values(
-        "spearman_cosine", ascending=False
+    df = (
+        pd.DataFrame(rows)
+        .set_index("model")
+        .sort_values("spearman_cosine", ascending=False)
     )
 
     print("\nFinal table:")

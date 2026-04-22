@@ -38,10 +38,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import warnings
-
-# warnings.simplefilter('ignore')
-
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 torch.manual_seed(47)
@@ -49,6 +45,7 @@ random.seed(92)
 np.random.seed(39)
 
 
+# Projection head for contrastive learning (SimCLR/NT-Xent style models)
 class ContrastiveModel(nn.Module):
     def __init__(self, backbone, projection_dim=128):
         super().__init__()
@@ -77,7 +74,6 @@ class ContrastiveModel(nn.Module):
         return projected
 
 
-# TODO: add logging to the class Trainer
 class Trainer:
     def __init__(self, config: str, device=None):
         self.config = TrainingConfig.from_config(config)

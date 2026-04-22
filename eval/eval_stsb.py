@@ -81,15 +81,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    # sentence-transformers/paraphrase-multilingual-mpnet-base-v2
-    # {'pearson_cosine': 0.8630022521158784, 'spearman_cosine': 0.8592535781144339}
-    # pool_targets {'pearson_cosine': 0.8530037387492666, 'spearman_cosine': 0.8548085691234922}
-    # don't pool targets {'pearson_cosine': 0.8555752686341339, 'spearman_cosine': 0.8549837409156329}
-
-    # intfloat/multilingual-e5-large
-    # {'pearson_cosine': 0.8545772316485915, 'spearman_cosine': 0.8525929803955488}
-
-    # intfloat/multilingual-e5-large-instruct
-    # {'pearson_cosine': 0.8455628969019475, 'spearman_cosine': 0.8568462550313934}
-

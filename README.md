@@ -242,7 +242,7 @@ python3 -m eval.eval_stsb
 python3 demo.py
 ```
 
-Edit the model path, target lemma, and input sentences at the top of `demo.py` to inspect sense-aware embeddings for your own examples.
+Edit the model path, target lemma, and input sentences at the main function of `demo.py` to see the model's predictions for different senses of a lemma in context.
 
 ---
 

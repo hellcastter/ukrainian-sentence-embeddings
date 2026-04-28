@@ -101,7 +101,7 @@ def find_best_meaning(
 
 def main():
     SUM_PATH = "./datasets_pre_defined/sum_final.jsonlines"
-    MODEL_NAME = "victormuryn/mpnet-use-combined-pt"
+    MODEL_NAME = "victormuryn/mpnet-use-markov-pt"
     TARGET_LEMMA = "коса"
     DEVICE = "cuda:0"
     SENTENCES = [

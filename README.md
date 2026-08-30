@@ -1,3 +1,4 @@
+# 🧠 Improving Ukrainian Word Sense Disambiguation with Sense-Aware Sentence Embeddings
 # 🧠 Semi-Supervised Word Sense Disambiguation for Ukrainian Sentence Embeddings
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)

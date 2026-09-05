@@ -18,7 +18,11 @@ def load_models(model_name: str, device: str):
     udpipe_model = UDPipeModel(PATH_TO_SOURCE_UDPIPE)
 
     print("Loading fine-tuned model...")
-    model = AutoModel.from_pretrained(model_name).to(device).eval()
+    model = (
+        AutoModel.from_pretrained(model_name, output_hidden_states=True)
+        .to(device)
+        .eval()
+    )
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     return model, tokenizer, udpipe_model

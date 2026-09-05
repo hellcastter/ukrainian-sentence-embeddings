@@ -73,4 +73,24 @@ def evaluate_wsd(
 
 
 if __name__ == "__main__":
-    evaluate_wsd(MODEL_NAME_OR_PATH, MODEL_NAME_OR_PATH, verbose=True)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Evaluate dictionary-sense WSD accuracy.")
+    parser.add_argument("--model-path", default=MODEL_NAME_OR_PATH)
+    parser.add_argument("--tokenizer-path", default=None)
+    parser.add_argument("--sum-path", default=SUM_PATH)
+    parser.add_argument("--device", default=DEVICE)
+    parser.add_argument(
+        "--no-reports",
+        action="store_true",
+        help="Skip POS/gloss reports and badly_predicted.csv; still print accuracy.",
+    )
+    args = parser.parse_args()
+    accuracy = evaluate_wsd(
+        args.model_path,
+        args.tokenizer_path,
+        verbose=not args.no_reports,
+        sum_path=args.sum_path,
+        device=args.device,
+    )
+    print(f"WSD accuracy (retained dictionary-sense rows): {accuracy:.6f}")

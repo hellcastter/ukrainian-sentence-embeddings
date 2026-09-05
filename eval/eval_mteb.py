@@ -75,7 +75,7 @@ elif CASE == 1:
     DEVICE = "cuda:1"
 
 
-def main():
+def main(model_paths=None, device=None):
     # get tasks that support ukrainian language
     ukrainian_tasks = mteb.get_tasks(
         languages=ALLOWED_LANGUAGES, modalities=ALLOWED_MODALITIES
@@ -89,8 +89,12 @@ def main():
 
     print(f"Found {len(ukrainian_tasks)} tasks that support Ukrainian language.")
 
-    for model_name_or_path in tqdm(models, desc="Evaluating models"):
-        model = SentenceTransformer(model_name_or_path, device=DEVICE)
+    for model_name_or_path in tqdm(
+        models if model_paths is None else model_paths, desc="Evaluating models"
+    ):
+        model = SentenceTransformer(
+            model_name_or_path, device=DEVICE if device is None else device
+        )
 
         # evaluate model on ukrainian tasks with caching
         cache = ResultCache(f"./cache/mteb_{model_name_or_path.replace('/', '_')}")
@@ -114,4 +118,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Evaluate text MTEB tasks supporting Ukrainian."
+    )
+    parser.add_argument("--models", nargs="+", default=None)
+    parser.add_argument(
+        "--device", default=None, help="Overrides the script's CASE-specific GPU."
+    )
+    args = parser.parse_args()
+    main(args.models, args.device)

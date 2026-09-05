@@ -14,9 +14,9 @@ from augment.translation.back_translator import (
     NLLB200TransformersTranslator,
 )
 
-INPUT_TEXTS_PATH = "local_datasets/semi_supervised/merged_collected_and_generated_mpnet.json"
+INPUT_TEXTS_PATH = "local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json"
 OUTPUT_TEXTS_PATH = (
-    "local_datasets/translation/augmented_sentences_translated_definitions.jsonl"
+    "local_datasets/augmented/translation/augmented_sentences_translated_definitions.jsonl"
 )
 
 BATCH_SIZE = 256
@@ -54,7 +54,7 @@ def main():
 
     try:
         for batch in tqdm(dataloader, desc="Augmenting"):
-            augmented_texts = translator(batch, n=NUM_AUGMENTATIONS)
+            augmented_texts = translator(batch["sentence"], n=NUM_AUGMENTATIONS)
             writer.write(batch, augmented_texts)
     finally:
         writer.close()

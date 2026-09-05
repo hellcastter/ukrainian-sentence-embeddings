@@ -11,8 +11,8 @@ from openai import OpenAI
 
 
 ## Configuration
-INPUT_FILE = "local_datasets/semi_supervised/lemmas_with_meanings_and_sentences.json"
-OUTPUT_FILE = "local_datasets/semi_supervised/generated_sentences.jsonl"
+INPUT_FILE = "local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet.json"
+OUTPUT_FILE = "local_datasets/semi_supervised_2/generated_sentences.jsonl"
 
 MIN_SENTENCES = 5
 BASE_URL = "http://localhost:8000/v1"

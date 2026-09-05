@@ -35,3 +35,5 @@ logs/
 # keep some files
 !.gitignore
 !.gitkeep
+!requirements.txt
+!requirements-notebooks.txt

@@ -39,7 +39,7 @@ models = [
 ]
 
 
-def main():
+def main(model_paths=None, device=None):
     # load dataset
     eval_dataset = load_dataset(benchmark_hf, split="train")
 
@@ -56,10 +56,10 @@ def main():
 
     rows = []
 
-    for model_name_or_path in models:
+    for model_name_or_path in (models if model_paths is None else model_paths):
         print(f"Evaluating {model_name_or_path}")
 
-        model = SentenceTransformer(model_name_or_path)
+        model = SentenceTransformer(model_name_or_path, device=device)
         results = evaluator(model)
 
         rows.append(
@@ -85,4 +85,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Evaluate Ukrainian STS-B correlations.")
+    parser.add_argument("--models", nargs="+", default=None)
+    parser.add_argument(
+        "--device", default=None, help="For example cuda:0 or cpu; default auto."
+    )
+    args = parser.parse_args()
+    main(args.models, args.device)

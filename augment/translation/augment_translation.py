@@ -29,7 +29,7 @@ logging.basicConfig(
 INPUT_TEXTS_PATH = (
     "local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json"
 )
-OUTPUT_TEXTS_PATH = "local_datasets/translation/augmented_sentences_translated_v3.jsonl"
+OUTPUT_TEXTS_PATH = "local_datasets/augmented/translation/augmented_sentences_translated_v3.jsonl"
 
 BATCH_SIZE = 256
 NUM_WORKERS = 2

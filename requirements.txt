@@ -1,0 +1,26 @@
+# Dependency inventory from source imports; NOT the original experiment lockfile.
+# Exact experiment versions must be recovered and validated before archival.
+torch
+transformers
+sentence-transformers
+datasets
+tokenizers
+accelerate
+numpy
+pandas
+scipy
+scikit-learn
+spacy
+ufal.udpipe
+stanza
+pymorphy2
+smart-open
+langdetect
+tqdm
+wandb
+python-dotenv
+openai
+ctranslate2
+sentencepiece
+simplejson
+mteb

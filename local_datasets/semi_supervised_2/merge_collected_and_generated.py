@@ -1,10 +1,10 @@
 import json
 
 COLLECTED_SENTENCES_PATH = (
-    "local_datasets/semi_supervised/lemmas_with_meanings_and_sentences_2.json"
+    "local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet.json"
 )
-GENERATED_SENTENCES_PATH = "local_datasets/semi_supervised/generated_sentences.jsonl"
-OUTPUT_PATH = "local_datasets/semi_supervised/merged_collected_and_generated_2.json"
+GENERATED_SENTENCES_PATH = "local_datasets/semi_supervised_2/generated_sentences.jsonl"
+OUTPUT_PATH = "local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json"
 
 
 def main():

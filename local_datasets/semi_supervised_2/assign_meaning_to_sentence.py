@@ -31,7 +31,7 @@ EMBEDDER_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 
 MEANINGS_PATH = "./local_datasets/semi_supervised_2/assigned_meanings_mpnet.jsonl"
 LEMMAS_WITH_MEANINGS_AND_SENTENCES_PATH = (
-    "./local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet.json"
+    "./local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet_filtered.json"
 )
 
 embedder = None

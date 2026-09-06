@@ -22,7 +22,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-HF_DATASET="victoraccount/wsd-training-dataset"
+HF_DATASET="victormuryn/wsd-training-dataset"
 
 # ── Only missing experiments ─────────────────────────────────────────────────
 #
@@ -152,25 +152,25 @@ MISSING_JOBS=(
     "raw|456|123|true"
     "raw|456|456|true"
 
-    # combined
-    "combined|42|42|false"
-    "combined|42|123|false"
-    "combined|42|456|false"
-    "combined|123|42|false"
-    "combined|123|123|false"
-    "combined|123|456|false"
-    "combined|456|42|false"
-    "combined|456|123|false"
-    "combined|456|456|false"
-    "combined|42|42|true"
-    "combined|42|123|true"
-    "combined|42|456|true"
-    "combined|123|42|true"
-    "combined|123|123|true"
-    "combined|123|456|true"
-    "combined|456|42|true"
-    "combined|456|123|true"
-    "combined|456|456|true"
+    # all_augs
+    "all_augs|42|42|false"
+    "all_augs|42|123|false"
+    "all_augs|42|456|false"
+    "all_augs|123|42|false"
+    "all_augs|123|123|false"
+    "all_augs|123|456|false"
+    "all_augs|456|42|false"
+    "all_augs|456|123|false"
+    "all_augs|456|456|false"
+    "all_augs|42|42|true"
+    "all_augs|42|123|true"
+    "all_augs|42|456|true"
+    "all_augs|123|42|true"
+    "all_augs|123|123|true"
+    "all_augs|123|456|true"
+    "all_augs|456|42|true"
+    "all_augs|456|123|true"
+    "all_augs|456|456|true"
 
     # markov
     "markov|42|42|false"

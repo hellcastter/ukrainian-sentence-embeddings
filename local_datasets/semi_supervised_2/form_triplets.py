@@ -30,7 +30,7 @@ DATASET_PATH = (
     "local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json"
 )
 OUTPUT_CSV = (
-    "local_datasets/semi_supervised_2/triplets_semi_supervised_all_augs_mixed_300.csv"
+    "local_datasets/semi_supervised_2/triplets_semi_supervised_all_augs_mixed_100.csv"
 )
 TOKENIZER = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 AUGMENTATION_PATHS = (
@@ -48,7 +48,7 @@ DEFINITIONS_AUGMENTATION_PATHS = (
     # "local_datasets/augmented/all_together/augmented_sentences_definitions_3.jsonl",
 )
 
-MAX_SENTENCES_PER_MEANING = 300
+MAX_SENTENCES_PER_MEANING = 100
 USE_AUGMENTED = True
 USE_DEFINITIONS_AUGMENTED = True
 

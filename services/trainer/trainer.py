@@ -40,10 +40,6 @@ load_dotenv()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-torch.manual_seed(47)
-random.seed(92)
-np.random.seed(39)
-
 
 # Projection head for contrastive learning (SimCLR/NT-Xent style models)
 class ContrastiveModel(nn.Module):
@@ -75,8 +71,8 @@ class ContrastiveModel(nn.Module):
 
 
 class Trainer:
-    def __init__(self, config: str, device=None):
-        self.config = TrainingConfig.from_config(config)
+    def __init__(self, config, device=None):
+        self.config = TrainingConfig.from_config(config) if isinstance(config, str) else config
 
         self.device = (
             torch.device(device)
@@ -209,7 +205,18 @@ class Trainer:
 
     def _setup_data(self):
         # 1. Load raw dataframes
-        df = pd.read_csv(self.config.train_data_path).sample(frac=1, random_state=42)
+        if self.config.hf_dataset and self.config.hf_subset:
+            from datasets import load_dataset
+            hf_token = os.environ.get("HF_TOKEN")
+            ds = load_dataset(
+                self.config.hf_dataset,
+                self.config.hf_subset,
+                token=hf_token,
+                split="train",
+            )
+            df = ds.to_pandas().sample(frac=1, random_state=42)
+        else:
+            df = pd.read_csv(self.config.train_data_path).sample(frac=1, random_state=42)
 
         # Simple 99/1 split as per your original code
         split_idx = int(len(df) * 0.99)
@@ -380,9 +387,9 @@ class Trainer:
 
                     break
 
-                path_to_save_model = self.config.path_to_save_fine_tuned_model
-                model_name = f"{path_to_save_model}/model_{self.run_id}_{epoch}"
-                self._save_model(self.model, model_name)
+                # path_to_save_model = self.config.path_to_save_fine_tuned_model
+                # model_name = f"{path_to_save_model}/model_{self.run_id}_{epoch}"
+                # self._save_model(self.model, model_name)
         except Exception as e:
             print(f"Training interrupted, error = {e}")
         finally:
@@ -390,18 +397,23 @@ class Trainer:
             model_name = f"{path_to_save_model}/model_{self.run_id}_final"
             self._save_model(self.model, model_name)
 
-            # final evaluation of the model
-            wsd_acc = evaluate_wsd(
-                model_path=model_name,
-                model_tokenizer_path=self.config.tokenizer_name,
-                verbose=True,
-                device=self.device,
-            )
+            try:
+                # final evaluation of the model
+                wsd_acc = evaluate_wsd(
+                    model_path=model_name,
+                    model_tokenizer_path=self.config.tokenizer_name,
+                    verbose=True,
+                    device=self.device,
+                )
 
-            # log final WSD accuracy to W&B if enabled
-            if self.config.log_to_wandb:
-                self.wandb_run.log({"test/wsd_acc": wsd_acc}, step=self.global_step)
-                wandb.finish()
+                # log final WSD accuracy to W&B if enabled
+                if self.config.log_to_wandb:
+                    self.wandb_run.log({"test/wsd_acc": wsd_acc}, step=self.global_step)
+            except Exception as e:
+                print(f"Final evaluation failed, error = {e}")
+            finally:
+                if self.config.log_to_wandb:
+                    wandb.finish()
 
 
 if __name__ == "__main__":
@@ -420,8 +432,67 @@ if __name__ == "__main__":
         default=None,
         help="Device to train on (e.g., 'cuda:0' or 'cpu'). Defaults to auto-detect.",
     )
+    parser.add_argument(
+        "--train-data",
+        type=str,
+        default=None,
+        help="Override train_data_path from config.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for torch, numpy, and random.",
+    )
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="Override wandb_run_name from config.",
+    )
+    parser.add_argument(
+        "--pool-targets",
+        type=lambda x: x.lower() in ("1", "true", "yes"),
+        default=None,
+        help="Override pool_targets from config (true/false).",
+    )
+    parser.add_argument(
+        "--hf-dataset",
+        type=str,
+        default=None,
+        help="HuggingFace dataset repo id (e.g. 'victormuryn/wsd-training-dataset').",
+    )
+    parser.add_argument(
+        "--hf-subset",
+        type=str,
+        default=None,
+        help="Subset folder within the HF dataset (e.g. 'dropout_seed42').",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Override batch_size from config.",
+    )
     args = parser.parse_args()
-    config_path = args.config
 
-    model_trainer = Trainer(config_path, device=args.device)
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+
+    config = TrainingConfig.from_config(args.config)
+    if args.train_data:
+        config.train_data_path = args.train_data
+    if args.run_name:
+        config.wandb_run_name = args.run_name
+    if args.pool_targets is not None:
+        config.pool_targets = args.pool_targets
+    if args.hf_dataset:
+        config.hf_dataset = args.hf_dataset
+    if args.hf_subset:
+        config.hf_subset = args.hf_subset
+    if args.batch_size is not None:
+        config.batch_size = args.batch_size
+
+    model_trainer = Trainer(config, device=args.device)
     model_trainer.train()

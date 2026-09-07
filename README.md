@@ -2,7 +2,7 @@
 
 Research code accompanying the manuscript by Victor Muryn and Yurii Laba, submitted to **PeerJ Computer Science** as an **AI Application** article. The approach adapts multilingual embeddings by pairing Ukrainian sentences with dictionary definitions of the meanings expressed by their target words.
 
-**Reproduction status:** the repository contains corpus extraction, pseudo-labeling, augmentation, triplet construction, training, and embedding-based evaluation code. It does **not yet provide an exact reproduction of all paper results**. The original environment, complete experiment/seed manifest, some data preparation steps, and result aggregation are missing; several implementation/manuscript discrepancies remain. Commands below describe the current implementation and state their prerequisites. See [Reproducibility issues found](#reproducibility-issues-found) before launching experiments.
+**Reproduction status:** the repository contains corpus extraction, pseudo-labeling, benchmark-overlap filtering, augmentation, triplet construction, training, and embedding-based evaluation code. Hugging Face training inputs and a launcher for **144 jobs** (eight configurations × three dataset seeds × three training seeds × two pooling settings) are now implemented. It does **not yet provide an exact reproduction of all paper results**: the original environment, artifact-to-result manifest, complete dataset-construction provenance, and result aggregation remain missing; several implementation/manuscript discrepancies remain. Commands below describe the current implementation and state their prerequisites. See [Reproducibility issues found](#reproducibility-issues-found) before launching experiments.
 
 Quick navigation: [datasets](#dataset-information) · [code](#code-structure) · [installation](#installation-and-requirements) · [hardware](#hardware-requirements) · [usage](#usage-instructions) · [method](#methodology) · [reproduction steps](#reproducing-the-paper) · [configurations](#reproducing-experimental-configurations) · [results](#reproducing-paper-tables-and-results) · [seeds](#randomness-and-seeds) · [outputs](#expected-outputs) · [models](#pretrained-models-and-external-ai-models)
 
@@ -10,7 +10,7 @@ Quick navigation: [datasets](#dataset-information) · [code](#code-structure) ·
 
 Word sense disambiguation (WSD) selects the meaning of an ambiguous word in context: for example, whether Ukrainian *коса* refers to a braid or a geographical feature. A dictionary supplies the possible meanings; contextual examples supply evidence for choosing among them.
 
-This project retrieves sentences containing ambiguous lemmas from UberText 2.0, assigns provisional meanings by comparing sentence and definition embeddings, and retains confident assignments. It supplements underrepresented meanings with generated sentences and creates transformed versions of sentences and definitions. A shared transformer encoder is then fine-tuned on sentence–definition triplets, bringing a sentence closer to its assigned definition and farther from another meaning of the same lemma.
+This project retrieves sentences containing ambiguous lemmas from UberText 2.0, assigns provisional meanings by comparing sentence and definition embeddings, and retains confident assignments. It removes natural contexts that closely match dictionary evaluation examples, supplements underrepresented meanings with generated sentences, and creates transformed versions of sentences and definitions. A shared transformer encoder is then fine-tuned on sentence–definition triplets, bringing a sentence closer to its assigned definition and farther from another meaning of the same lemma.
 
 The code supports investigating corpus/meaning coverage, training sense-aware embeddings, and evaluating WSD, Ukrainian STS-B, and Ukrainian MTEB tasks. Exploratory notebooks support coverage analysis. The zero-shot LLM comparison, human pseudo-label quality audit, sense-availability result tables, and nine-run statistical aggregation do not have complete executable reproduction workflows here. Generated training sentences use an LLM, but that script is **not** an LLM WSD evaluator.
 
@@ -33,7 +33,7 @@ The 11 MTEB task names reported in the manuscript are SIB200, UkrFormal, SIB200C
 
 ### Official benchmark revision and loading
 
-**Benchmark version referenced for the PeerJ Computer Science article: revision `07d2cd2`.** Its full immutable commit is `07d2cd250f1e17333a6fa233a6b9b0cf8c9789e2`. Use the revision-pinned dataset rather than an evolving `main` branch. The maintained dataset-card source is [docs/huggingface/README.md](docs/huggingface/README.md).
+**Benchmark version referenced for the PeerJ Computer Science article: revision `07d2cd2`.** Its full immutable commit is `07d2cd250f1e17333a6fa233a6b9b0cf8c9789e2`. Use the revision-pinned dataset rather than an evolving `main` branch. See the [Hugging Face dataset card](https://huggingface.co/datasets/yuriilaba/ukrainian-homonym-dict) for the maintained dataset description.
 
 ```python
 from datasets import load_dataset
@@ -75,13 +75,18 @@ These are raw-file measurements, not counts or an identifier of the official exp
 | Deduplicated corpus contexts | `local_datasets/raw_sentences/process_raw_sentences.py` | `local_datasets/raw_sentences/unique_lemma_sentences.jsonl`; each record has `lemma` and `sentences` |
 | Confident pseudo-label assignments | `local_datasets/semi_supervised_2/assign_meaning_to_sentence.py` | `assigned_meanings_mpnet.jsonl` in the same directory; `lemma`, `sentence`, `similarity`, `probability`, `assigned_meaning` |
 | Meaning-organized natural pool | Same pseudo-label script | `lemmas_with_meanings_and_sentences_mpnet.json` in the same directory; lemma → first gloss → `{meaning: {gloss, examples}, sentences: [...]}`. Empty sentence lists preserve uncovered meanings. The `examples` metadata comes from the dictionary; it is not the anchor pool. |
+| Natural pool after benchmark-overlap filtering | `local_datasets/semi_supervised_2/delete_similar_sentences.py`; removes natural contexts with cosine similarity ≥0.95 to any dictionary example in the input | `local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet_filtered.json`; same nested schema, preserving meaning metadata. This is the input for generation and merging. |
 | Generated sentences | `collect_sentences/generate_sentences_4_absent_meanings.py` | `local_datasets/semi_supervised_2/generated_sentences.jsonl`; nested lemma/meaning objects with generated sentence strings |
 | Merged natural/generated pool | `local_datasets/semi_supervised_2/merge_collected_and_generated.py` | `local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json`; generated entries carry `source='generated'` and null similarity/probability |
 | Transformation outputs | Scripts under `augment/` | JSON Lines with `sentence` and `augmented` (list of strings), under `local_datasets/augmented/`; exact filenames appear under Expected Outputs |
 | Training triplets | `local_datasets/semi_supervised_2/form_triplets.py` | CSV with `lemma,anchor,positive,negative,anchor_target_word_ids,meaning_idx`; target indices are a JSON-encoded list inside the CSV field |
 | Fine-tuned checkpoints | `services/trainer/trainer.py` | Hugging Face encoder/tokenizer and mean-pooling SentenceTransformer exports under `models/fine-tuned-models/` |
 
-These artifacts are produced by this project, but contain or derive from third-party text/model outputs. No separate generated-data license, public archive, or artifact checksum manifest is committed. Their redistribution terms must be established separately from the code license.
+The training launcher uses the project dataset [victormuryn/wsd-training-dataset](https://huggingface.co/datasets/victormuryn/wsd-training-dataset). `services/trainer/trainer.py` downloads a selected configuration's `train` split through `datasets.load_dataset`; files reside in the Hugging Face cache, with no required manual copy into this repository. The eight configuration prefixes are `raw`, `generated`, `mask`, `dropout`, `translation`, `token_shuffling`, `markov`, and `all_augs`, each with suffix `_seed42`, `_seed123`, or `_seed456`. These are prepared triplet datasets, separate from the evaluation benchmark. The active triplet trainer requires `anchor`, `positive`, and `negative` text columns and, for target pooling, compatible `anchor_target_word_ids`; the local builder's full schema is shown above.
+
+Loading these prepared datasets allows training without repeating corpus extraction and augmentation. It does not rebuild their three construction seeds: no dataset-generation/upload driver or checksum manifest links the local builder to all 24 published configurations. The training loader does not pin a dataset revision. Record the resolved dataset identity and hashes with each run, and recover the paper's exact revision before claiming historical reproduction.
+
+Project artifacts contain or derive from third-party text/model outputs. No separate generated-data license or complete artifact checksum manifest is recorded in this code repository. Their redistribution terms must be established separately from the code license.
 
 Older triplet-rewriting scripts in `local_datasets/augmented/translation/` and the archived NT-Xent dataset builder automatically load the Hugging Face identifier `hellcaster/wsd-sentences`, split `back_translation`, expecting `sentence` and `augmented` columns. This is an additional historical project-data dependency, not an input to the active pipeline. No revision, license record, or confirmed mapping to the paper's datasets is supplied.
 
@@ -93,6 +98,10 @@ Older triplet-rewriting scripts in `local_datasets/augmented/translation/` and t
 ├── local_datasets/
 │   ├── raw_sentences/             # Merge/deduplicate extracted batches
 │   ├── semi_supervised_2/         # Active pseudo-labeling and triplet pipeline; EDA notebooks
+│   │   ├── assign_meaning_to_sentence.py # Contexts + dictionary → confident natural pool
+│   │   ├── delete_similar_sentences.py   # Natural pool → pool without benchmark overlaps
+│   │   ├── merge_collected_and_generated.py # Filtered pool + generation JSONL → merged pool
+│   │   └── form_triplets.py      # Selected pool + optional transformations → triplet CSV
 │   ├── augmented/translation/     # Older triplet rewriting experiments
 │   ├── archive/                   # Earlier pseudo-labeling, mining, and NT-Xent experiments
 │   └── sum_and_ubertext_eda.ipynb  # Dictionary/corpus coverage exploration
@@ -119,7 +128,7 @@ Older triplet-rewriting scripts in `local_datasets/augmented/translation/` and t
 │       ├── data_factory.py       # DataLoaders and collators
 │       └── losses.py             # Triplet, MNR, and NT-Xent implementations
 ├── eval/                         # eval_wsd.py, eval_stsb.py, eval_mteb.py
-├── docs/huggingface/README.md     # Maintained source of the official benchmark dataset card
+├── train_all.sh                  # 144 HF-dataset training jobs across seeds/pooling settings
 ├── scripts/reproduce/environment_report.py # Local environment/asset report; no downloads
 ├── datasets_pre_defined/         # External inputs; normally only .gitkeep is committed
 ├── models/                       # External weights/checkpoints; normally only .gitkeep
@@ -153,7 +162,7 @@ The active pipeline is `semi_supervised_2`, not `archive/semi_supervised`. Archi
 | OpenAI Python client / generation server | Local OpenAI-compatible chat completion request | Client, server, model revision, quantization, and decoding defaults unrecorded |
 | Other runtime/notebook packages | `smart-open`, `langdetect`, `tqdm`, `wandb`, `python-dotenv`, `simplejson`, plotting/notebook tools | Not pinned |
 
-No original requirements/lockfile, Conda environment, Dockerfile, Slurm job, shell-based experiment driver, committed W&B run export, or CUDA/driver version record was found. The new requirements files list dependencies inferred from imports; **they are not a recovered or validated paper environment**. Installing currently resolved versions can encounter API incompatibilities. Replace them with a tested, fully pinned environment once the authors recover the original records; do not label a new environment as the historical one.
+No original requirements/lockfile, Conda environment, Dockerfile, Slurm job, committed W&B run export, or CUDA/driver version record was found. `train_all.sh` now supplies an experiment driver, but no environment lock. The requirements files list dependencies inferred from imports; **they are not a recovered or validated paper environment**. Installing currently resolved versions can encounter API incompatibilities. Replace them with a tested, fully pinned environment once the authors recover the original records; do not label a new environment as the historical one.
 
 ### Environment setup
 
@@ -197,7 +206,8 @@ These are newly created local records, not original paper metadata. They are ign
 ### Assets, authentication, and external services
 
 - Load the official processed benchmark from the pinned Hugging Face revision above. The current legacy raw-data scripts additionally need their raw dictionary input; obtain that input and the UDPipe weights separately, as described in Dataset Information. spaCy is loaded at import time by shared embedding utilities, so it is needed even for several nominally UDPipe-based entry points.
-- Hugging Face identifiers passed to `from_pretrained`/`SentenceTransformer` normally download weights/tokenizers when missing from the local cache. No model or dataset revision is pinned. No Hugging Face token is read explicitly by project code, and no gated-access requirement is recorded. If upstream access changes, use the libraries' authentication mechanism and record that dependency.
+- Hugging Face model loaders normally download weights/tokenizers when missing from the cache. Active model loaders and the training dataset loader have no revision pin; the official evaluation benchmark is pinned in the loading example above. The trainer reads optional `HF_TOKEN` from the environment and passes it to `load_dataset`. No gated-access requirement is recorded; supply a token if your chosen resource requires access. `.env.example` currently documents W&B only.
+- The matrix launcher requires Bash, `flock`, `mktemp`, `sed`, and `python3` from the activated environment. Check `command -v flock` before launching; provide a system package supplying `flock` if absent. The launcher is intended for a CUDA/Linux environment and has no CPU mode.
 - Back-translation requires **already converted CTranslate2 OPUS models** at `models/translators/opus-mt-zle-en-ct2` and `models/translators/opus-mt-en-zle-ct2`. Tokenizers download automatically; converted weights do not. The repository has an NLLB converter command in comments, but no validated OPUS conversion recipe, source revisions, or conversion metadata. Obtain the original artifacts or recover and validate that recipe before running translation.
 - Training loads `.env`. The original INI enables W&B under an author-specific entity. Use `reviewer_config.ini` to disable W&B, or set `wandb_entity`, `wandb_project_name`, and optionally `wandb_run_name` in your INI and supply `WANDB_API_KEY` using `.env.example` as a template. No author-account access is needed when logging is disabled.
 - Generation uses `BASE_URL='http://localhost:8000/v1'`, `API_KEY='EMPTY'`, and `MODEL_NAME='Qwen/Qwen3-VL-8B-Instruct'` in its Python script. These are constants, **not environment variables**. An OpenAI-compatible server must already be serving that identifier. The earlier README identifies llama.cpp as the original server, but no launch command, version, quantization, or server configuration is supplied. The generation script does not launch the server or download Qwen weights.
@@ -205,6 +215,8 @@ These are newly created local records, not original paper metadata. They are ign
 ## Hardware Requirements
 
 The manuscript reports training on **one NVIDIA RTX 3090**. The trainer uses one selected device, defaults to CUDA when available, and accepts `--device cuda:0` or `--device cpu`. Although `enable_gpu_parallel=True` appears in the configuration, the current trainer does not implement that flag. It is not evidence of multi-GPU training.
+
+`train_all.sh` defaults to two independent workers on `cuda:0` and `cuda:1`, with one training run per worker. Set `--num-gpus 1` to run its 144 jobs sequentially on one GPU. This is job scheduling, not distributed training of one model. The overlap filter lets SentenceTransformer select its device; it stores embeddings for all natural contexts and dictionary examples in memory and computes similarities in chunks of 2,048 contexts, so chunking does not bound total embedding storage.
 
 CUDA training uses FP16 autocast and gradient scaling; CPU training disables AMP. Input sequences are padded/truncated to 128 subword tokens. The configured batch size is 104, and all encoder layers are trainable by default. No measured peak VRAM, RAM minimum, driver version, or minimum GPU specification is committed; the reported GPU is a reference machine rather than a validated minimum.
 
@@ -279,7 +291,9 @@ For triplet indices and WSD inference, `_find_target_word_in_sentence` uses a mo
 p(meaning | sentence, lemma) = softmax(cosine_similarity / 0.05)
 ```
 
-The highest-probability meaning is retained only when **probability ≥ 0.9 AND cosine similarity ≥ 0.6**. Exact equality between the sentence and the meaning's first gloss is excluded. Batch size is **2048**. Filtering is inside the assignment script; there is no separate unfiltered-prediction artifact or filtering command. Dictionary examples remain metadata and are not encoded to produce these pseudo-labels.
+The highest-probability meaning is retained only when **probability ≥ 0.9 AND cosine similarity ≥ 0.6**. Exact equality between the sentence and the meaning's first gloss is excluded. Batch size is **2048**. This confidence filtering is inside the assignment script; no artifact of all rejected assignments is saved. Dictionary examples remain metadata and are not encoded to produce these pseudo-labels.
+
+The subsequent `delete_similar_sentences.py` stage embeds those dictionary examples and retained natural contexts with the same MPNet identifier and normalized SentenceTransformer embeddings. It removes a context if its maximum cosine similarity to **any example across all lemmas** is **≥0.95**. Encoding batch size is **512**; similarity chunks contain **2,048** contexts. It preserves definitions, examples, and meanings whose natural context list becomes empty. It reads examples from the input JSON metadata, so isolation against the official Hugging Face snapshot still requires verification that those examples match that snapshot. This filter runs before generation/transformations and does not audit the later generated or transformed outputs.
 
 ### 6. Generation-based augmentation
 
@@ -305,7 +319,7 @@ Standalone augmentation DataLoaders use batch size **256** and **2** workers. ML
 
 The active `form_triplets.py` samples a contextual anchor, a positive definition from its assigned meaning, and a negative definition from a different meaning **of the same lemma**. Augmented definitions are added to the appropriate pools. There is no hard-negative mining or in-batch negative objective in this default path.
 
-`MAX_SENTENCES_PER_MEANING=300` caps sampled source sentences and distributes a **target of 300 candidate triplet draws** across each nonempty meaning. The script tries unused combinations within each source sentence, then permits repeats once combinations are exhausted. The computed unique-combination cap is not used by the final loop. Failed target-word matches are skipped, so output can be below 300 rows per meaning and is not guaranteed unique. Meanings with zero contexts produce no rows. This differs from the manuscript's maximum of 100 unique triplets.
+`MAX_SENTENCES_PER_MEANING=100` caps sampled source sentences and distributes a **target of 100 candidate triplet draws** across each nonempty meaning. Commit `2b1f205` changed this constant from 300 to 100. The script tries unused combinations within each source sentence, then permits repeats once combinations are exhausted. The computed unique-combination cap is not used by the final loop. Failed target-word matches are skipped, so output can be below 100 rows per meaning and is not guaranteed unique. Meanings with zero contexts produce no rows. The numeric cap now matches the manuscript, but the manuscript's uniqueness claim remains unresolved.
 
 Target indices are computed with the MPNet tokenizer before training. Only anchors have target indices in the default CSV; definitions use whole-input mean pooling. Changing the tokenizer requires rebuilding the indices.
 
@@ -324,16 +338,18 @@ The trainer loads a Hugging Face `AutoModel` and shares it across all three trip
 | Optimizer | AdamW; learning rate **2e-6**, weight decay **0.01** |
 | Gradient clipping | Maximum norm **1.0** |
 | Schedule | Linear warm-up/decay; **0.1** warm-up ratio; `apply_warmup=True` |
-| Train/validation split | CSV shuffled with pandas `random_state=42`; **99% / 1% by triplet row** |
+| Train/validation split | Selected HF `train` split or local CSV shuffled with pandas `random_state=42`; **99% / 1% by triplet row**, independently of training seed |
 | Validation / early stopping | Before each epoch and every **200** minibatches after batch index 0; patience **10** in INI, **15** in dataclass fallback |
 | Trainable layers | `layers_to_unfreeze=0` means all layers trainable |
 | AMP | FP16 plus GradScaler on CUDA; disabled on CPU |
 | Data loading | **4** workers, prefetch factor **2**, persistent workers, pinned memory; both train and validation shuffled |
 | Random initialization | Pretrained weights used; reinitialization settings are not wired into the trainer |
 
-The supplied original INI points to a dropout CSV that the active default builder does not produce. The new `reviewer_config.ini` changes only the input CSV to the active builder's output and disables W&B; optimization/pooling settings are unchanged. It is a **current-code example, not a recovered paper-run configuration**.
+The CLI now accepts `--hf-dataset`, `--hf-subset`, `--train-data`, `--seed` (default 42), `--pool-targets`, `--run-name`, and `--batch-size`, alongside config/device selection. Providing both HF arguments selects the prepared dataset and bypasses the configured CSV. The same training seed is applied to Python, NumPy, and PyTorch before trainer initialization.
 
-Validation drives checkpoint selection using loss, not WSD accuracy. `_best` is saved only at an improving within-epoch check with `batch_count > 0`; epoch/final exports also exist. Final WSD evaluation loads `_final`, not `_best`. MNR and NT-Xent branches are experimental and have known defects; they are not required for the manuscript's cosine-triplet experiments.
+The original INI points to a dropout CSV; `reviewer_config.ini` disables W&B but still points to the former `..._300.csv` output. Neither path automatically follows the current builder. There is also a local-input regression: `TrainingConfig` lacks `hf_dataset`/`hf_subset` defaults, yet `_setup_data` accesses them directly. The documented HF command supplies both attributes through the CLI; local CSV execution requires that config defect to be fixed and the input path to be updated. The reviewer INI remains a **current-code example, not a recovered paper-run configuration**.
+
+Validation drives checkpoint selection using loss, not WSD accuracy. `_best` is saved only at an improving within-epoch check with `batch_count > 0`; early-stopped and final exports also exist. Ordinary per-epoch saving is currently commented out. Final WSD evaluation loads `_final`, not `_best`. MNR and NT-Xent branches are experimental and have known defects; they are not required for the manuscript's cosine-triplet experiments.
 
 ### 10. WSD inference/evaluation
 
@@ -350,6 +366,8 @@ MTEB loads SentenceTransformer models, dynamically selects Ukrainian text tasks,
 ## Reproducing the Paper
 
 **Read this as a dependency-ordered execution guide for the current code.** Steps with unavailable external assets or missing paper procedures are explicitly marked. Completing the executable stages alone does not resolve the manuscript discrepancies. Record every run's source revision, environment, input hashes, configuration, seeds, and output identity before claiming paper reproduction.
+
+There are two entry points: rebuild natural/generated/augmented data through Steps 0–6, or load the prepared Hugging Face triplets in Step 7. No script uploads Step 6's output to Hugging Face or establishes that it reproduces all published subsets. Both training routes still require the trainer's morphology assets, and final WSD evaluation requires the raw dictionary input.
 
 ### Step 0 — Prepare the benchmark, legacy raw input, morphology assets, and corpus
 
@@ -419,9 +437,21 @@ Inputs: dictionary at `SUM_PATH` and deduplicated contexts. Outputs: `assigned_m
 
 ### Step 3 — Confidence filtering and benchmark isolation
 
-The **0.9 probability / 0.6 cosine** confidence filter already ran in Step 2; do not run a second invented filtering stage.
+The **0.9 probability / 0.6 cosine** confidence filter already ran in Step 2. Now apply the separate **0.95 cosine** benchmark-overlap filter:
 
-**Missing paper step:** the manuscript's “Benchmark isolation and leakage prevention” paragraph specifies removal of corpus contexts with cosine similarity ≥0.95 to benchmark examples before augmentation. No implementation or filtered artifact manifest for that operation was found. Recover the original procedure and inputs before treating the following stages as a paper reproduction. Do not silently substitute exact-match deduplication or a newly chosen embedding model.
+```bash
+python -m local_datasets.semi_supervised_2.delete_similar_sentences
+```
+
+Input: `local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet.json`. Output: `local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet_filtered.json`, overwritten on each successful run. The filter uses MPNet and all dictionary `meaning.examples` stored in the input. It prints total/retained/removed counts; it does not save a complete excluded-record manifest or set an explicit RNG seed. Model, threshold, batch sizes, and input/output paths are constants in the script.
+
+For optional inspection without writing the output, use:
+
+```bash
+python -m local_datasets.semi_supervised_2.delete_similar_sentences --dry-run --show 20
+```
+
+The dry run still performs full embedding/similarity computation and prints the first matching exclusions; it is not a cheap smoke test. Run the normal command to create the file required by Step 4. The implementation now exists, but historical filter outputs, input identity against the official benchmark, and proof that this procedure produced the published training datasets still need to be archived.
 
 ### Step 4 — Generate examples and merge
 
@@ -432,7 +462,7 @@ python -m collect_sentences.generate_sentences_4_absent_meanings
 python -m local_datasets.semi_supervised_2.merge_collected_and_generated
 ```
 
-Generation reads the meaning-organized natural pool and appends `generated_sentences.jsonl`. Merge reads that file plus the natural pool and overwrites `merged_collected_and_generated_mpnet.json`, all under `local_datasets/semi_supervised_2/`. The server's sampling state is not recorded by these commands. Merge warns about missing meanings or fewer than five examples, but does not remedy them. For the Natural configuration, skip generation/merge and point the triplet builder directly at the natural pool as described below.
+Generation and merging both read `lemmas_with_meanings_and_sentences_mpnet_filtered.json` from Step 3. Generation checks the remaining natural counts and appends `generated_sentences.jsonl`; merge reads those generated records plus the filtered natural pool and overwrites `merged_collected_and_generated_mpnet.json`, all under `local_datasets/semi_supervised_2/`. The server's sampling state is not recorded by these commands. Merge warns about missing meanings or fewer than five examples, but does not remedy them. For the Natural configuration, skip generation/merge and point the triplet builder directly at the **filtered** natural pool as described below. Existing generated, merged, transformed, and triplet files are not retroactively corrected by the path fix; retain their provenance and rebuild downstream artifacts when using newly filtered inputs.
 
 ### Step 5 — Transform sentences and definitions
 
@@ -468,19 +498,26 @@ Select `DATASET_PATH`, `OUTPUT_CSV`, `USE_AUGMENTED`, `USE_DEFINITIONS_AUGMENTED
 python -m local_datasets.semi_supervised_2.form_triplets
 ```
 
-Current defaults read the merged pool and all four individual transformation pairs. Output: `local_datasets/semi_supervised_2/triplets_semi_supervised_all_augs_mixed_300.csv`. The script sets Python's seed to 42, loads both spaCy and UDPipe, and computes MPNet target indices. **This produces the current 300-draw behavior, not the manuscript's 100-unique-triplet algorithm.** Do not change the constant alone and claim equivalence: uniqueness/sampling logic also differs.
+Current defaults read the merged pool and all four individual transformation pairs. Output: `local_datasets/semi_supervised_2/triplets_semi_supervised_all_augs_mixed_100.csv`. The script sets Python's seed to 42, loads both spaCy and UDPipe, and computes MPNet target indices. It attempts 100 draws per nonempty meaning, with skipped target matches and possible repeated triplets. The numeric change alone does not establish the manuscript's 100-unique-triplet procedure or recreate the published HF configurations.
 
-### Step 7 — Train a current-code example
+### Step 7 — Train from a prepared Hugging Face dataset
+
+After installing dependencies and preparing the morphology assets and raw dictionary for final evaluation, run one All combined, dataset-seed-42, training-seed-42, target-pooling example:
 
 ```bash
 python -m services.trainer.trainer \
   --config services/trainer/reviewer_config.ini \
-  --device cuda:0
+  --device cuda:0 \
+  --hf-dataset victormuryn/wsd-training-dataset \
+  --hf-subset all_augs_seed42 \
+  --seed 42 \
+  --pool-targets true \
+  --run-name all_augs_seed42_trainseed42_pooltrue
 ```
 
-Inputs: Step 6 CSV, pretrained encoder/tokenizer, and morphology assets. Output: epoch, optional best/early-stopped, and final model directories under `models/fine-tuned-models/`. The reviewer INI disables W&B and selects Step 6's default CSV. With W&B disabled, the run identifier is a timestamp. Record that identifier and the full INI immediately; original seed values are still hard-coded in the trainer. Final WSD evaluation also requires the dictionary snapshot and POS-report resources.
+Inputs: the selected HF configuration's `train` split, pretrained encoder/tokenizer, and morphology assets. The trainer creates its 99/1 split internally with shuffle seed 42. Outputs: optional best/early-stopped and final model directories under `models/fine-tuned-models/`, followed by WSD evaluation of the final export. The reviewer INI disables W&B; its old CSV path is bypassed by the two HF arguments. With W&B disabled, checkpoint IDs are timestamps and `--run-name` does not replace them; record the command and checkpoint path together. With W&B enabled, the name labels the W&B run and checkpoint IDs use the W&B run ID. Final WSD evaluation also requires the dictionary snapshot and POS-report resources.
 
-For another configuration, edit `train_data_path` and pooling in your chosen INI before running. The trainer's parser currently accepts a nonexistent config path and silently falls back to dataclass defaults; verify that the intended file exists and was loaded. The original `fine_tuning_config.ini` remains available but requires its dropout CSV and either authorized W&B settings or logging disabled.
+Select another HF subset, pooling setting, or seed using the CLI. `--batch-size` overrides the INI batch size. For freshly constructed local CSVs, first resolve the missing `hf_dataset`/`hf_subset` config defaults described under Reproducibility issues, then select the new `_100.csv` using `--train-data` or an updated INI. The old local-only README command cannot currently complete `_setup_data`. Missing config files also silently fall back to defaults; verify the chosen INI exists.
 
 ### Steps 8–10 — Evaluate WSD, STS-B, and MTEB
 
@@ -494,17 +531,32 @@ python -m eval.eval_stsb --models "$MODEL_PATH" --device cuda:0
 python -m eval.eval_mteb --models "$MODEL_PATH" --device cuda:0
 ```
 
-WSD inputs include the dictionary and morphology resources. STS-B/MTEB load their external datasets. Outputs follow the Usage and Expected Outputs sections. Explicitly record whether the directory is `_best`, an epoch export, or `_final`: the trainer itself evaluates `_final`, and no manifest maps historical checkpoints to the paper's result rows. Each STS invocation overwrites the same CSV, so preserve it before the next invocation or pass multiple models together. MTEB uses model-path-based caches; reusing a path with changed weights can reuse stale results.
+WSD inputs include the dictionary and morphology resources. STS-B/MTEB load their external datasets. Outputs follow the Usage and Expected Outputs sections. Explicitly record whether the directory is `_best`, `_early_stopped`, or `_final`: the trainer itself evaluates `_final`, and no manifest maps historical checkpoints to the paper's result rows. Each STS invocation overwrites the same CSV, so preserve it before the next invocation or pass multiple models together. MTEB uses model-path-based caches; reusing a path with changed weights can reuse stale results.
 
 There is no executable Step 11 for the paper's zero-shot LLM comparison or a final command that regenerates all manuscript tables.
 
 ## Reproducing Experimental Configurations
 
-The following **manuscript names** can be related to existing data pools. They are not named CLI presets or a recovered manifest of the original experiments. Selection currently requires editing constants in `local_datasets/semi_supervised_2/form_triplets.py` and saving that source/config with the run.
+For training on prepared triplets, `train_all.sh` defines the following HF configuration prefixes. The mapping reflects repository naming and augmentation pools; the original artifact-to-result manifest is still required to verify each published result.
+
+| Paper configuration | HF configuration prefix | Example subset for dataset seed 42 |
+| --- | --- | --- |
+| Natural | `raw` | `raw_seed42` |
+| Generation | `generated` | `generated_seed42` |
+| Generation + MLM | `mask` | `mask_seed42` |
+| Generation + Dropout | `dropout` | `dropout_seed42` |
+| Generation + Back-translation | `translation` | `translation_seed42` |
+| Generation + Shuffling | `token_shuffling` | `token_shuffling_seed42` |
+| Stochastic combination | `markov` | `markov_seed42` |
+| All combined | `all_augs` | `all_augs_seed42` |
+
+Use the same prefixes with `_seed123` and `_seed456` for the other dataset construction seeds. The dataset is `victormuryn/wsd-training-dataset`; `combined` is not the prefix used by the current launcher.
+
+For rebuilding the triplets locally, selection still requires editing constants in `local_datasets/semi_supervised_2/form_triplets.py` and preserving that source/config with each output:
 
 | Paper configuration | `DATASET_PATH` choice | Augmentation selection in the triplet builder | Reproduction limit |
 | --- | --- | --- | --- |
-| Natural | `local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet.json` | Set both `USE_AUGMENTED=False` and `USE_DEFINITIONS_AUGMENTED=False` | Natural pool exists only after preparation; isolation step and paper sampling algorithm missing |
+| Natural | `local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet_filtered.json` | Set both `USE_AUGMENTED=False` and `USE_DEFINITIONS_AUGMENTED=False` | Requires Step 3; unique sampling and original artifact provenance remain unresolved |
 | Generation | `local_datasets/semi_supervised_2/merged_collected_and_generated_mpnet.json` | Both flags false | Requires original generation settings/artifacts |
 | Generation + MLM | Same merged pool | Both flags true; retain only the `mask/` entry in each path tuple | Original augmentation seed settings unavailable |
 | Generation + Dropout | Same merged pool | Both flags true; retain only the `dropout/` entry in each tuple | Original INI names a dropout CSV, but no matching saved builder configuration is supplied |
@@ -513,7 +565,7 @@ The following **manuscript names** can be related to existing data pools. They a
 | Stochastic combination | Same merged pool | Both flags true; select only the currently commented `all_together/` entry in each tuple | Stop/continue probability and branch retention require resolution |
 | All combined | Same merged pool | Both flags true; four individual methods, the active defaults | This mapping is supported by the code's pool union, but no original per-run manifest confirms the precise published composition |
 
-Change `OUTPUT_CSV` to a distinct destination for every dataset/configuration and point the training INI's `train_data_path` at it. Filenames are under user control; no seed-specific filenames or artifacts for all these rows are currently supplied. The default filename does not change automatically when flags change.
+Change `OUTPUT_CSV` to a distinct destination for every locally rebuilt dataset/configuration. The default filename does not change automatically when flags change, and the builder still hard-codes seed 42. The launcher selects already constructed seed-specific HF datasets; it does not generate these CSV variants. Local CSV training has the config-default blocker described in Step 7.
 
 For **full-sentence anchor pooling**, set:
 
@@ -531,7 +583,19 @@ use_both_poolings = False
 
 Both settings retain full-definition mean pooling in the active triplet path. `use_both_poolings=True` averages full-input and target-anchor objectives; it is not one of these two paper settings.
 
-The manuscript specifies **three dataset-construction seeds × three training seeds = nine runs per configuration/pooling setting**. The repository supplies only one fixed set of library seeds, no three-value seed lists, and no loop/launcher mapping datasets to training runs. Exact nine-run reproduction is therefore unavailable. Recover the three dataset seed values, the three complete training RNG settings, and the generated-data provenance before constructing a run matrix. Repeating the current command nine times does not implement the manuscript design.
+The equivalent CLI overrides are `--pool-targets false` for full-sentence anchors and `--pool-targets true` for target-token anchors, with `use_both_poolings=False` in the INI.
+
+The launcher implements **dataset seeds {42, 123, 456} × training seeds {42, 123, 456} = nine runs per configuration/pooling setting**. Across eight configurations and two poolings, this is **144 unique jobs using 24 HF subsets**. The dataset seed chooses the subset; `--seed` controls Python, NumPy, and PyTorch within training. The pandas split seed remains 42. This matches the manuscript's run-count design, while the exact construction process and historical result/checkpoint mapping still need provenance.
+
+To launch this entire matrix on one GPU with W&B disabled:
+
+```bash
+bash train_all.sh --config services/trainer/reviewer_config.ini --num-gpus 1
+```
+
+This schedules actual training; there is no dry-run flag. The script also accepts `--batch-size N` and defaults to two GPUs if `--num-gpus` is omitted. Without `--config`, it uses `fine_tuning_config.ini`, which enables the author-specific W&B entity. Run names follow `<prefix>_seed<dataset_seed>_trainseed<training_seed>_pool<true|false>`.
+
+Despite its `MISSING_JOBS` variable and completion message, the launcher always queues its full hard-coded list; it does not detect finished experiments or resume training. Errors are printed and processing continues, and trainer exceptions can be swallowed before reaching the shell. The final “complete” message and shell exit status do not establish 144 successful runs. Check each run's logs/evaluation and archive a success/failure manifest; no automatic mean/SD or manuscript-table aggregation follows this command. Shared `eval_wsd.log` and `badly_predicted.csv` outputs are not separated by run and can collide with multiple workers.
 
 ## Reproducing Paper Tables and Results
 
@@ -543,7 +607,7 @@ Paper result labels below refer to groups identifiable in the supplied manuscrip
 | Meaning coverage after confidence filtering | `local_datasets/semi_supervised_2/eda_lemmas_with_meanings.ipynb` | Meaning-organized natural pool | Interactive counts/distributions, including uncovered meanings/lemmas; no publication-table generator |
 | Pseudo-label human QA | Assignment script supplies candidate records only | Retained assignments plus human labels | The manuscript's 400-record sample, annotations, sampling seed, and agreement/CI computation are not provided |
 | WSD baselines | `python -m eval.eval_wsd` with explicit model arguments as above | Chosen model, dictionary, morphology assets | Printed dictionary-sense-row accuracy, optional error CSV; full paper baseline roster and context-level protocol not reproduced |
-| Augmentation/pooling comparison | Triplet builder → trainer → WSD evaluator | Selected pools, INI, model exports | Per-run loss/checkpoints and WSD return value; no nine-run mapping, mean/SD aggregation, or table script |
+| Augmentation/pooling comparison | `bash train_all.sh --config services/trainer/reviewer_config.ini --num-gpus 1` → trainer's final WSD evaluation | 24 HF subsets, INI, pretrained model and morphology/raw dictionary assets | 144 scheduled runs across nine seed combinations per configuration/pooling; checkpoints and WSD return values. No historical result manifest, mean/SD aggregation, or table script; success must be checked per run. |
 | Sense-availability analysis | No dedicated implementation found | Would require natural counts joined to gold meanings and aligned predictions | Cannot regenerate the paper's availability-group accuracy/gain tables from a supplied command |
 | STS-B results | `python -m eval.eval_stsb` with explicit models | `anikol12/STSB-UK`, selected models | `sts_results.csv`; no configuration grouping or mean/SD across nine runs |
 | Ukrainian MTEB results | `python -m eval.eval_mteb` with explicit models | Installed registry's tasks, selected models | Per-task score JSON; original task/revision manifest and paper aggregation missing |
@@ -558,19 +622,21 @@ The stored notebooks are exploratory evidence, not a frozen full-paper workflow.
 | Corpus collection | No explicit language-detector seed; unordered multiprocessing results; analyzer/model versions can affect retention |
 | Deduplication / ordering | Sets converted to lists in raw merging and augmentation/triplet pools; no fixed `PYTHONHASHSEED` or stable ordering |
 | Pseudo-label assignment | No explicit RNG seed; fixed thresholds, but model/device/library differences remain |
+| Benchmark-overlap filter | No explicit RNG seed; fixed threshold 0.95 and first-match dry-run samples; input identity and model/device/library versions determine retained contexts |
 | Generation | No seed, temperature, or top-p in the API request; server defaults and model/quantization determine sampling |
 | Standalone dropout/shuffling | Python `random` used without an entry-point seed |
 | MLM | `Masker(seed=42)` resets the global Python RNG; replacement sampling uses PyTorch without an explicit seed in that stage |
 | Translation | Sampling parameters provided, but no CTranslate2 seed configured |
 | Stochastic orchestrators | `random.seed(42)`; `Masker` also resets that global seed; batch-level choices share the RNG with augmentation operations |
 | Triplet builder | `random.seed(42)` in `__main__`; context/definition sampling affected by input and set ordering |
-| Trainer | `torch.manual_seed(47)`, `random.seed(92)`, `np.random.seed(39)` at module import; these are three libraries in **one run**, not three training runs |
+| Dataset selection in launcher | Subsets use dataset seed labels **42, 123, 456**; the launcher loads prepared datasets and does not seed or rerun their construction |
+| Trainer CLI | `torch.manual_seed(args.seed)`, `random.seed(args.seed)`, `np.random.seed(args.seed)` before initialization; default **42**, launcher values **42, 123, 456**. Earlier library-specific values 47/92/39 were replaced in `2b1f205`. Programmatic `Trainer(...)` use does not execute the CLI seeding block. |
 | Split | pandas shuffle uses independent `random_state=42`, then positional 99/1 split |
 | DataLoader/model | Training dropout and shuffled train/validation loaders use RNG state; no explicit loader generator or worker seed function |
 | CUDA determinism | No separate CUDA seed call, deterministic-algorithm setting, or cuDNN determinism configuration is specified; fixed seeds alone do not establish exact reproducibility |
 | Exploratory notebooks | PCA/TSNE references use `random_state=42`; KMeans uses `random_state=0`; not the paper's training seed grid |
 
-Archived dataset rewrites also use Python seed 42, but are not the active scientific workflow. Neither code nor supplied manuscript provides the complete three-by-three seed values. No expensive experiment was rerun to infer them. A future seed interface must address all stage-specific RNGs and ordering rather than merely looping over `torch.manual_seed`.
+Archived dataset rewrites also use Python seed 42, but are not the active scientific workflow. The current three-by-three grid is explicit in `train_all.sh`; regenerating its dataset seeds still requires control of all construction-stage RNGs and ordering. Fixed training seeds do not guarantee deterministic GPU runs. No expensive experiment was rerun to establish historical equivalence. The HF dataset/subset attributes and training seed are not dataclass fields, so the current W&B config export omits them; the launcher includes subset/seed labels in the run name, but a separate manifest must record dataset revision, command, config, and checkpoint identity.
 
 ## Expected Outputs
 
@@ -581,12 +647,15 @@ All destinations are generated at runtime and are generally Git-ignored. See Dat
 | Extraction | Six `local_datasets/raw_sentences/lemma_examples_samples_<analyzer>_<corpus>.json` files from the documented loop; appended JSONL batches |
 | Deduplication | `local_datasets/raw_sentences/unique_lemma_sentences.jsonl` |
 | Pseudo-labeling | `local_datasets/semi_supervised_2/assigned_meanings_mpnet.jsonl` and `lemmas_with_meanings_and_sentences_mpnet.json` |
+| Benchmark-overlap filtering | `local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet_filtered.json`; terminal counts, with sample exclusions in dry-run mode |
 | Generation/merge | `local_datasets/semi_supervised_2/generated_sentences.jsonl` and `merged_collected_and_generated_mpnet.json` |
 | Dropout / MLM / shuffling | In `local_datasets/augmented/dropout/`, `mask/`, or `token_shuffling/`: `augmented_sentences.jsonl` and `augmented_sentences_definitions.jsonl` |
 | Back-translation | `local_datasets/augmented/translation/augmented_sentences_translated_v3.jsonl` and `augmented_sentences_translated_definitions.jsonl` |
 | Stochastic combination | `local_datasets/augmented/all_together/augmented_sentences_3.jsonl` and `augmented_sentences_definitions_3.jsonl`; root-level `selected_augmenters_log.json` and `selected_augmenters_definitions_log.json` record batch-level choices |
-| Default triplets | `local_datasets/semi_supervised_2/triplets_semi_supervised_all_augs_mixed_300.csv` |
-| Checkpoints | Under configured save directory: `model_<run_id>_<epoch>`, `model_<run_id>_best` when eligible, `model_<run_id>_<epoch>_early_stopped` when triggered, and `model_<run_id>_final` |
+| Default triplets | `local_datasets/semi_supervised_2/triplets_semi_supervised_all_augs_mixed_100.csv` |
+| HF training inputs | Selected `victormuryn/wsd-training-dataset` subset in the library-managed cache; no local CSV export is performed |
+| Checkpoints | Under configured save directory: `model_<run_id>_best` when eligible, `model_<run_id>_<epoch>_early_stopped` when triggered, and `model_<run_id>_final`. Ordinary `model_<run_id>_<epoch>` saving is commented out. |
+| Matrix launcher | Per-job prefixed terminal output and trainer artifacts; no durable queue, success/failure summary file, or result aggregation. Temporary counter/lock files are cleaned up at launcher exit. |
 | Training metrics | Console progress; W&B only when enabled. No complete local loss/metric CSV or resumable optimizer/scheduler/RNG checkpoint is implemented. |
 | WSD | `eval_wsd.log`; optional root `badly_predicted.csv`; POS helper may create `data/pos_precalculation.pkl`. No complete prediction JSONL. Accuracy is printed by the CLI and returned by `evaluate_wsd`. |
 | STS-B | Root `sts_results.csv`, with model index and `pearson_cosine`, `spearman_cosine` columns |
@@ -657,17 +726,20 @@ For scientific changes, explain the effect on sampling, filtering, pooling, eval
 
 ## Reproducibility issues found
 
-This audit inspected all Python modules, configuration files, notebook sources/metadata, the previous README, Git-tracked file inventory, and locally supplied manuscript/supplement sources. There were no committed environment/lockfiles, Docker/Slurm/shell launchers, automated tests, CI configuration, or full W&B run exports to recover. The local dictionary and UDPipe archive were inspected without running model inference. Findings refer to the supplied manuscript sections, since the manuscript files themselves were untracked at audit time.
+The initial audit inspected Python modules, configuration files, notebook sources/metadata, prior documentation, Git-tracked files, and locally supplied manuscript/supplement sources. This README now incorporates the filter, trainer, seed-grid, and path changes through `6b79fb7`, including the committed `train_all.sh`. No original pinned environment, Docker/Slurm setup, automated tests/CI, or full W&B run exports were recovered. Findings refer to the supplied manuscript sections; original run provenance remains necessary to distinguish current behavior from the code that generated each reported result.
 
 ### Remaining issues requiring resolution
 
 | Severity | File / relevant location | Problem | Recommended fix |
 | --- | --- | --- | --- |
 | **important** | `services/config.py::SUM_PATH`; `services/utils_data.py::read_and_transform_data`; manuscript “Ukrainian WSD benchmark” | Official Hugging Face revision `07d2cd2` is identified and verified: 1,464/3,071/15,961. Raw-loader output equivalence and the original per-result snapshot/subset remain unverified. | Supply run provenance and a validated direct loader for the processed snapshot. Confirm dataset licensing. No dataset relocation is required. |
-| **critical** | `assign_meaning_to_sentence.py::process_lemma`; manuscript “Benchmark isolation and leakage prevention” | Paper's cosine ≥0.95 benchmark-overlap removal has no implementation/artifact manifest here. | Recover the original filter, embedding settings, excluded-record list, and stage ordering; audit overlap before new training. |
-| **critical** | `local_datasets/semi_supervised_2/form_triplets.py::MAX_SENTENCES_PER_MEANING`, `get_recommended_number_of_sentences`, final sampling loop; manuscript “Contrastive triplet construction” | Code targets 300 draws, ignores computed unique cap, and permits repeats; manuscript says at most 100 unique triplets. | Recover the actual experiment version/data. Resolve algorithm and manuscript together; do not change only the numeric constant. |
+| **important** | `local_datasets/semi_supervised_2/delete_similar_sentences.py`, example collection and `keep_mask`; generation/merge input constants | Cosine ≥0.95 filtering and downstream routing are implemented. The filter uses input JSON examples; their equivalence to the official snapshot, historical excluded records, and provenance of published training subsets remain unverified. Generated/transformed outputs are not checked by this stage. | Archive input/output hashes, model revision, retained/removed counts and excluded records; verify example identity and audit final training overlap. Preserve provenance when rebuilding downstream data. |
+| **critical** | `local_datasets/semi_supervised_2/form_triplets.py::MAX_SENTENCES_PER_MEANING`, `get_recommended_number_of_sentences`, final sampling loop; manuscript “Contrastive triplet construction” | Code now targets 100 draws but ignores the computed unique cap and permits repeats; manuscript says at most 100 unique triplets. | Recover the actual experiment version/data and measure duplicates. Resolve sampling logic and manuscript together; the change from 300 to 100 alone is insufficient. |
 | **critical** | `services/word_sense_detector.py::run`; `PredictionStrategy.max_sim_across_all_examples`; `services/utils_results.py::prediction_accuracy` | Evaluation aggregates dictionary examples into one sense-row prediction and excludes null rows; manuscript describes contextual-example WSD. | Confirm which protocol produced each result; recover/export per-context predictions and coverage if that is the reported unit. |
-| **critical** | `services/trainer/trainer.py` module seeds; augmentation entry points; manuscript “Training procedure” | No three dataset seeds × three training settings, run manifest, or aggregation driver. | Supply exact seed lists/library mapping, dataset hashes, checkpoint IDs, and mean/SD aggregation procedure. |
+| **important** | `train_all.sh::MISSING_JOBS`; trainer CLI seeding; augmentation entry points; manuscript “Training procedure” | The 42/123/456 × 42/123/456 training matrix is implemented, but construction-stage seed control, original dataset-to-checkpoint mapping and aggregation are missing. CLI seeding replaced the former 47/92/39 library seeds. | Recover which code/seeds generated each paper result; archive dataset hashes, construction commands, checkpoint IDs and mean/SD aggregation. |
+| **important** | `services/trainer/training_config.py::TrainingConfig`; `trainer.py::_setup_data`; `reviewer_config.ini::train_data_path` | Local CSV/default training accesses undefined `hf_dataset`/`hf_subset` attributes. Reviewer INI still names `_300.csv`, while the builder writes `_100.csv`. | Add optional HF fields with null defaults, validate paired HF arguments and update the local input path. The HF example supplies both attributes and bypasses the stale CSV setting. |
+| **important** | `services/trainer/trainer.py::_setup_data`, `_init_logger` | Training HF dataset has no revision pin; dataset/subset and training seed are omitted from the dataclass-based W&B config export. | Add validated revision/seed/dataset config fields, preserve the actual resolved revision and record input hashes with each checkpoint. |
+| **important** | `train_all.sh::worker`, `MISSING_JOBS`, final `wait`; `trainer.py::train` | All 144 jobs are queued without checking completion; failures can yield a success exit and unconditional completion message. Concurrent WSD reports share output paths. | Propagate failures, collect per-job status, validate finished outputs before skipping runs, and use separate log/prediction destinations. Until then, inspect each run independently. |
 | **important** | `requirements.txt`; notebook metadata | New dependency inventory is unpinned and unvalidated; only notebook Python 3.10.14 is established. | Recover the original environment, pin transitive packages and system/CUDA versions, then run an integration smoke test. |
 | **important** | `augment/common.py::markov_process`; `augment/augment_all_together*.py`; manuscript “Combining Augmentations” | Code stops with probability 0.75; manuscript describes continuing with 0.75. Code reduces variants starting at step two; wording says after the second augmentation. | Confirm original stochastic process and archive selection logs; reconcile documentation/code before reproducing this configuration. |
 | **important** | `augment/augment_all_together*.py::main`, `final_augmented_texts[original] = augmented_list` | Multiple branches mapping to one source overwrite earlier branches. | Recover intended retention rule, add an isolated branching example, and version any correction as a behavior change. |
@@ -686,21 +758,31 @@ This audit inspected all Python modules, configuration files, notebook sources/m
 | **important** | `services/trainer/losses.py::MNRLoss.forward`, `NTXentLoss.__init__`; `trainer.py::_init_loss` | MNR drops target indices; NT-Xent expects a `.backbone` wrapper but receives raw AutoModel. | Mark as unsupported experimental branches until repaired and tested; avoid them for the paper's triplet runs. |
 | **important** | `augment/translation/augment_translation.py::main`; `augment/common.py::ThreadedWriter` | Resume reads wrong record key and writer truncates files; writer errors are printed and can discard batches. | Preserve original outputs, implement explicit safe resume/failure handling, and verify input/output counts. |
 | **important** | Repository root; external data/model resources | No code license or complete third-party redistribution record. | Authors select a code license and document each dataset/model's terms before archival. |
-| **minor** | `services/trainer/training_config.py::from_config`; original INI | Missing config silently falls back; original INI names missing dropout CSV and author W&B entity. | Validate config existence/types and supply recovered per-experiment presets; reviewer example avoids the default path/account mismatch. |
+| **minor** | `services/trainer/training_config.py::from_config`; original INI | Missing config silently falls back; original INI names missing dropout CSV and author W&B entity. | Validate config existence/types and supply recovered per-experiment presets. The documented HF example bypasses CSV selection and uses the reviewer INI to disable W&B. |
+| **minor** | `train_all.sh` usage comment, `NUM_GPUS`, `flock` call | Usage comment names nonexistent `train_missing.sh`; default is two GPUs and no dependency/device preflight is performed. | Correct CLI documentation and validate positive GPU count/devices and required tools; the command here uses the actual filename and one GPU. |
 | **minor** | `trainer.py::_setup_optimizer`, `train_epoch`; `training_config.py` | `warmup_ratio=0` with `apply_warmup=True` calls `.step()` on `None`; GPU-parallel/reinitialization flags are unused. | Guard scheduler use and reject/document unsupported options; defaults used by the paper are unaffected by the zero-ratio branch. |
 | **minor** | `demo.py::main`; evaluation script defaults; archived code | Fixed devices/checkpoint IDs and outdated paths remain in defaults/archive; optional frequency source missing. | Use explicit evaluation CLI overrides; supply manifests for historical paths and document optional report inputs. |
 
-### Supporting fixes made with this README
+### Supporting fixes in the initial README revision (`9e496e5`)
 
 - Added source-derived `requirements.txt`, optional notebook requirements, `.env.example`, and a dependency-free environment-report script. Added Git-ignore exceptions so requirements files can be committed.
 - Aligned generation/merge inputs and outputs with the active `semi_supervised_2` pseudo-label pool and the merged filename expected downstream. This changes file routing, not generation/pseudo-label parameters. Archived scripts were preserved.
 - Aligned OPUS augmentation output directories with triplet-builder inputs; corrected definition translation to pass `batch['sentence']` instead of iterating the batch dictionary's keys. Newly generated definition translations therefore correct an execution/data-routing defect and must not be represented as recovered historical outputs.
 - Added model/device selection to STS-B/MTEB CLIs and model/tokenizer/dictionary/device/report selection to WSD CLI. Existing default model lists and metric behavior were preserved; WSD CLI now prints the returned accuracy explicitly.
-- Added `reviewer_config.ini`, selecting the active builder output with W&B disabled and unchanged optimization/pooling settings.
+- Added `reviewer_config.ini` with W&B disabled and unchanged optimization/pooling settings. Its CSV path matched the builder at that commit and now needs updating for `_100.csv` in local-file workflows.
 - Explicitly requested hidden states in demo model loading, as required by its existing pooling utilities.
 
-No thresholds, margins, scientific seed values, triplet counts, stochastic transition logic, evaluation aggregation units, or reported results were changed. No expensive experiment was run. README/source/CLI checks and small isolated supporting-code checks do not establish model-training or paper-result reproducibility.
+That initial documentation/supporting-code revision did not alter thresholds, margins, scientific seed values, triplet counts, stochastic transition logic, evaluation aggregation units, or reported results. Later changes to triplet counts, seed handling, and filter routing are listed below. Static source/documentation checks do not establish model-training or paper-result reproducibility; no expensive experiment was run for this README update.
+
+### Subsequent implementation changes documented here
+
+- `2b1f205`: added the MPNet cosine ≥0.95 overlap filter; changed the triplet target/output from 300 to 100; added HF dataset loading and CLI overrides for training inputs, seed, pooling, run name and batch size. CLI seed handling replaced the older library-specific seeds.
+- `47de6d9`: added `train_all.sh` with eight configurations, three dataset seeds, three training seeds and both pooling settings, totaling 144 jobs.
+- `32bd6f6`: corrected the training dataset identifier to `victormuryn/wsd-training-dataset` and configuration prefix to `all_augs`.
+- `6b79fb7`: restored assignment output to the pre-overlap-filter filename and changed generation/merge to read the filter's `_filtered.json` output. This corrects the file handoff; already generated datasets/results are not retroactively changed.
+
+These additions make more stages executable but do not establish that newly generated artifacts equal the historical paper inputs. The current README update changes documentation only and keeps unresolved scientific and execution issues visible.
 
 ### Official benchmark identification update
 
-The official expanded benchmark is `yuriilaba/ukrainian-homonym-dict` at revision `07d2cd2`; its immutable Parquet file and counts were verified. The manuscript now uses the corrected count of 1,464 lemmas. The dataset card is maintained in `docs/huggingface/README.md` for publication as the Hugging Face repository's root `README.md`. This resolves the missing public processed-snapshot location, without claiming that the legacy raw loader or all original runs have been reconciled. No data, training parameters, or evaluation behavior were changed in this documentation update.
+The official expanded benchmark is `yuriilaba/ukrainian-homonym-dict` at revision `07d2cd2`; its immutable Parquet file and counts were verified in the earlier benchmark audit. The documented count is 1,464 lemmas. The dataset description is linked on Hugging Face; a local dataset-card draft under `docs/huggingface/README.md` is not currently tracked in this code repository and is not a prerequisite for a clone. This resolves the missing public processed-snapshot location, without claiming that the legacy raw loader or all original runs have been reconciled.

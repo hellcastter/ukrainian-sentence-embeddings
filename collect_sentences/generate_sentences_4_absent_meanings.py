@@ -11,7 +11,7 @@ from openai import OpenAI
 
 
 ## Configuration
-INPUT_FILE = "local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet.json"
+INPUT_FILE = "local_datasets/semi_supervised_2/lemmas_with_meanings_and_sentences_mpnet_filtered.json"
 OUTPUT_FILE = "local_datasets/semi_supervised_2/generated_sentences.jsonl"
 
 MIN_SENTENCES = 5

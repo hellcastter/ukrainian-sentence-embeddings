@@ -23,7 +23,7 @@ Paths in tables below are **required external inputs or generated destinations**
 | Resource | Purpose and source | Acquisition and expected location/format | Preprocessing and redistribution status |
 | --- | --- | --- | --- |
 | Ukrainian dictionary/WSD source data | Definitions, ambiguous lemma inventory, and evaluation examples; prior benchmark described by [Laba et al. (2023)](https://aclanthology.org/2023.unlp-1.2/) | Manual. Current `services.config.SUM_PATH` is `datasets_pre_defined/sum_final.jsonlines`. Raw dictionary JSON Lines, schema below. **TODO: publish the exact download URL, snapshot date, and provenance.** The older README referred to `sum_fixed.jsonlines`; the active code overrides that path with `sum_final.jsonlines`. | Processed by `read_and_transform_data(..., homonym=True)` in `services/utils_data.py`. Underlying dictionary/benchmark license and redistribution permission are not recorded here. Do not infer permission from code availability. |
-| Expanded WSD snapshot used in the manuscript | Paper reports 1,434 lemmas, 3,071 meanings, and 15,961 contextual examples after benchmark construction | No separately versioned processed benchmark or construction manifest is committed. A local raw `sum_final.jsonlines` was available during this audit; its identity is recorded below. **Its equivalence to the paper's processed benchmark is not established.** | Requires exact preprocessing software and source snapshot. Rebuilding the upstream dictionary extraction is not implemented in this repository. Publication URL/DOI and redistribution terms remain author TODOs. |
+| Official expanded WSD benchmark | [yuriilaba/ukrainian-homonym-dict](https://huggingface.co/datasets/yuriilaba/ukrainian-homonym-dict), designated snapshot for the PeerJ article: **revision `07d2cd2`**. Verified: **1,464 lemmas, 3,071 meanings, 15,961 examples**. | Load through Hugging Face `datasets` with full revision `07d2cd250f1e17333a6fa233a6b9b0cf8c9789e2`, split `train`. Processed Parquet columns: `lemma`, `gloss`, `examples`; one row per meaning. No relocation or raw-file upload to GitHub is needed. | Contextual examples are reserved for evaluation; the lemma inventory and definitions also support training-data preparation/adaptation. The `train` split name is a storage convention. No dataset license is declared. The legacy raw-dictionary loader does not directly accept this processed schema. |
 | UberText 2.0, sentence-split news, Wikipedia, and fiction | Naturally occurring unlabeled contexts; [project download page](https://lang.org.ua/en/ubertext/) and [corpus paper](https://aclanthology.org/2023.unlp-1.1/) | Manual download to `datasets_pre_defined/`; UTF-8 text, one sentence per line, compressed as `.txt.bz2`. The download commands below preserve URLs from the previous README. | Extraction normalizes whitespace, filters sentences, and matches lemmas with UDPipe or spaCy. Both analyzers' outputs are merged. License/redistribution terms are not preserved here; consult the corpus provider before redistributing extracted text. |
 | Ukrainian STS-B, `anikol12/STSB-UK` | Sentence-level similarity evaluation; identifier in `eval/eval_stsb.py` | Downloaded through `datasets.load_dataset`, split `train`, into the library-managed cache. Expected columns: `sentence1`, `sentence2`, `score`. No dataset revision is specified. | Script changes the score of exactly identical sentence pairs to `1.0`; all other scores are used as supplied. The manuscript reports 5,749 pairs. Translation provenance, exact snapshot, and license need confirmation from the dataset provider. |
 | Ukrainian text tasks selected by MTEB | Classification, clustering, retrieval, and bitext mining; task definitions come from the installed `mteb` package | Automatic task-specific downloads/caching. `mteb.get_tasks(languages=['ukr'], modalities=['text'])`, followed by an exact modality filter. No task/dataset revision or frozen task list is supplied. | Each underlying dataset has its own terms. The paper lists 11 tasks, but the script selects tasks dynamically, so a different MTEB installation can produce a different suite. |
@@ -31,11 +31,32 @@ Paths in tables below are **required external inputs or generated destinations**
 
 The 11 MTEB task names reported in the manuscript are SIB200, UkrFormal, SIB200ClusteringS2S, WebFAQQAs, WebFAQQuestions, NTREX, Bible-NLP, Flores, Tatoeba, Belebele, and WebFAQ. These are **manuscript labels**, not a verified list of runnable task identifiers for an unspecified MTEB version. Task-specific URLs, subsets, revisions, and license records must be recovered from the original evaluation environment.
 
-### Source schema and snapshot identity
+### Official benchmark revision and loading
+
+**Benchmark version referenced for the PeerJ Computer Science article: revision `07d2cd2`.** Its full immutable commit is `07d2cd250f1e17333a6fa233a6b9b0cf8c9789e2`. Use the revision-pinned dataset rather than an evolving `main` branch. The maintained dataset-card source is [docs/huggingface/README.md](docs/huggingface/README.md).
+
+```python
+from datasets import load_dataset
+
+benchmark = load_dataset(
+    "yuriilaba/ukrainian-homonym-dict",
+    revision="07d2cd250f1e17333a6fa233a6b9b0cf8c9789e2",
+    split="train",
+)
+assert len(benchmark) == 3071
+assert len(set(benchmark["lemma"])) == 1464
+assert sum(len(examples) for examples in benchmark["examples"]) == 15961
+```
+
+The pinned `data/train-00000-of-00001.parquet` has SHA-256 `25f792dc3aad4f3349f643bbc1da1cb9889b35d0a18d2bb77ab71d9e7365a6f2`. These counts were measured from that file and are the corrected counts used for the manuscript. Dataset availability and version identity are established; original run records are still needed to verify the exact snapshot/subset behind each result.
+
+The contextual evaluation sentences must not be treated as training anchors merely because the split is called `train`. Candidate definitions and the lemma inventory are used by the method during corpus selection, pseudo-labeling, and adaptation, so the evaluation-only statement applies to `examples`, not to every field.
+
+### Legacy raw source schema and local-file identity
 
 `read_and_transform_data` expects dictionary records with `lemma`, `prime`, `suffixes`, `tags`, `synsets`, `phrases`, `word_id`, and `url`. Each synset has `sense_id`, a list of `gloss` strings, and an `examples` list whose entries contain `ex_text`. It is not a loader for a flat sentence-label CSV. The processed in-memory table contains `lemma`, lists of `gloss` strings, and lists of `examples`, with one row per retained dictionary meaning.
 
-The inspected raw records contain source links to the SUM-20 dictionary, for example [entry `wordid=1`](https://sum20ua.com/Entry/index?wordid=1). This identifies an underlying dictionary source; it does not establish a downloadable, redistributable benchmark snapshot or its extraction date.
+The inspected raw records contain source links to the SUM-20 dictionary, for example [entry `wordid=1`](https://sum20ua.com/Entry/index?wordid=1). This identifies the underlying dictionary source. The official processed benchmark is the pinned Hugging Face dataset above; its upstream extraction date and complete construction manifest are still unrecorded.
 
 The **local, untracked** raw file examined during README preparation had:
 
@@ -43,7 +64,7 @@ The **local, untracked** raw file examined during README preparation had:
 - Size: 456,658,460 bytes; 138,044 raw dictionary records.
 - SHA-256: `6e4ecd7c9fde0a486826f6d033f14a7c020f9b503208abc4262cf0855401da6c`.
 
-These are raw-file measurements, not counts of the expanded WSD evaluation set. A reviewer cannot obtain this file from the committed source alone. The authors must confirm its provenance and relationship to the manuscript before publishing it or treating the checksum as the paper's data identifier.
+These are raw-file measurements, not counts or an identifier of the official expanded WSD benchmark. This raw file is not required to download the Hugging Face snapshot and does not need to be uploaded to GitHub. The existing raw-dictionary preparation/evaluation entry points still expect it; their output has not been checked for row-by-row equivalence to the published benchmark. Do not pass the processed three-column dataset through `read_and_transform_data`, which expects the nested raw schema.
 
 ### Project-generated data and intermediate artifacts
 
@@ -98,6 +119,7 @@ Older triplet-rewriting scripts in `local_datasets/augmented/translation/` and t
 │       ├── data_factory.py       # DataLoaders and collators
 │       └── losses.py             # Triplet, MNR, and NT-Xent implementations
 ├── eval/                         # eval_wsd.py, eval_stsb.py, eval_mteb.py
+├── docs/huggingface/README.md     # Maintained source of the official benchmark dataset card
 ├── scripts/reproduce/environment_report.py # Local environment/asset report; no downloads
 ├── datasets_pre_defined/         # External inputs; normally only .gitkeep is committed
 ├── models/                       # External weights/checkpoints; normally only .gitkeep
@@ -174,7 +196,7 @@ These are newly created local records, not original paper metadata. They are ign
 
 ### Assets, authentication, and external services
 
-- Obtain the UDPipe weight file and dictionary snapshot manually; see Dataset Information. spaCy is loaded at import time by shared embedding utilities, so it is needed even for several nominally UDPipe-based entry points.
+- Load the official processed benchmark from the pinned Hugging Face revision above. The current legacy raw-data scripts additionally need their raw dictionary input; obtain that input and the UDPipe weights separately, as described in Dataset Information. spaCy is loaded at import time by shared embedding utilities, so it is needed even for several nominally UDPipe-based entry points.
 - Hugging Face identifiers passed to `from_pretrained`/`SentenceTransformer` normally download weights/tokenizers when missing from the local cache. No model or dataset revision is pinned. No Hugging Face token is read explicitly by project code, and no gated-access requirement is recorded. If upstream access changes, use the libraries' authentication mechanism and record that dependency.
 - Back-translation requires **already converted CTranslate2 OPUS models** at `models/translators/opus-mt-zle-en-ct2` and `models/translators/opus-mt-en-zle-ct2`. Tokenizers download automatically; converted weights do not. The repository has an NLLB converter command in comments, but no validated OPUS conversion recipe, source revisions, or conversion metadata. Obtain the original artifacts or recover and validate that recipe before running translation.
 - Training loads `.env`. The original INI enables W&B under an author-specific entity. Use `reviewer_config.ini` to disable W&B, or set `wandb_entity`, `wandb_project_name`, and optionally `wandb_run_name` in your INI and supply `WANDB_API_KEY` using `.env.example` as a template. No author-account access is needed when logging is disabled.
@@ -329,15 +351,17 @@ MTEB loads SentenceTransformer models, dynamically selects Ukrainian text tasks,
 
 **Read this as a dependency-ordered execution guide for the current code.** Steps with unavailable external assets or missing paper procedures are explicitly marked. Completing the executable stages alone does not resolve the manuscript discrepancies. Record every run's source revision, environment, input hashes, configuration, seeds, and output identity before claiming paper reproduction.
 
-### Step 0 — Prepare the dictionary, morphology assets, and corpus
+### Step 0 — Prepare the benchmark, legacy raw input, morphology assets, and corpus
 
-Obtain the exact author-approved raw dictionary snapshot and place it at the configured location. If using the locally supplied root-level file described above, the following copies it without overwriting an existing destination:
+The official expanded benchmark is already hosted on Hugging Face: use the revision-pinned loading example under Dataset Information. Do not move it to another archive or upload the large raw dictionary to GitHub. **Integration gap:** the existing pipeline/evaluator still calls the nested raw-dictionary loader; directly consuming the processed Hugging Face rows requires an explicit loader path and validation that preserves their meanings/examples. No implicit reconstruction or extra filtering is applied here.
+
+To execute the existing legacy pipeline commands below, obtain the author-approved raw dictionary input and place it at the configured location. If using the locally supplied root-level file described above, the following copies it without overwriting an existing destination:
 
 ```bash
 cp -n sum_final.jsonlines datasets_pre_defined/sum_final.jsonlines
 ```
 
-This command requires that local file; it is not a download method. Obtain `models/20180506.uk.mova-institute.udpipe` separately and install the spaCy model as described above. **Blocked for a fresh clone until the dictionary and UDPipe asset locations are supplied.**
+This command requires that local file; it is not a download method. Obtain `models/20180506.uk.mova-institute.udpipe` separately and install the spaCy model as described above. **The legacy raw-data execution path remains blocked for a fresh clone until the raw input and UDPipe weights are available; the official processed benchmark itself is publicly available.**
 
 Derive the lemma list through the same preprocessing function used for pseudo-labeling/evaluation:
 
@@ -354,7 +378,7 @@ print('lemmas:', len(lemmas), 'meanings:', len(frame),
 PY
 ```
 
-This new convenience command invokes existing preprocessing; it does not recover the missing upstream snapshot-construction process. Confirm the printed counts against the manuscript rather than assuming they match. The output lemma file is overwritten.
+This convenience command invokes legacy raw preprocessing; it does not recover the upstream construction process or establish equivalence to the official snapshot. Compare its rows/counts against the pinned Hugging Face data, including the verified 1,464-lemma count, rather than assuming they match. The output lemma file is overwritten.
 
 Download the sentence-split source files using URLs already documented by this project (availability and checksums have not been revalidated in this audit):
 
@@ -575,7 +599,7 @@ Optional frequency reports in `services/utils_results.py` additionally require `
 
 ## Pretrained Models and External AI Models
 
-No `revision=` argument or immutable model commit is pinned in the active loaders. Model identifiers below are taken from source; model availability, access conditions, and licenses need to be archived with the release.
+No immutable pretrained-model commit is pinned in the active model loaders. The official WSD data revision is separately pinned in the loading example above. Model identifiers below are taken from source; model availability, access conditions, and licenses need to be archived with the release.
 
 | Identifier/resource | Provider and role | How loaded |
 | --- | --- | --- |
@@ -639,7 +663,7 @@ This audit inspected all Python modules, configuration files, notebook sources/m
 
 | Severity | File / relevant location | Problem | Recommended fix |
 | --- | --- | --- | --- |
-| **critical** | `services/config.py::SUM_PATH`; `services/utils_data.py::read_and_transform_data`; manuscript “Ukrainian WSD benchmark” | No published, immutable expanded snapshot/construction manifest. Local raw file is not verified against 1,434/3,071/15,961 processed counts. | Confirm source, preprocessing, counts, hash, public archive/DOI, and redistribution permission; preserve the exact processed candidate inventory. |
+| **important** | `services/config.py::SUM_PATH`; `services/utils_data.py::read_and_transform_data`; manuscript “Ukrainian WSD benchmark” | Official Hugging Face revision `07d2cd2` is identified and verified: 1,464/3,071/15,961. Raw-loader output equivalence and the original per-result snapshot/subset remain unverified. | Supply run provenance and a validated direct loader for the processed snapshot. Confirm dataset licensing. No dataset relocation is required. |
 | **critical** | `assign_meaning_to_sentence.py::process_lemma`; manuscript “Benchmark isolation and leakage prevention” | Paper's cosine ≥0.95 benchmark-overlap removal has no implementation/artifact manifest here. | Recover the original filter, embedding settings, excluded-record list, and stage ordering; audit overlap before new training. |
 | **critical** | `local_datasets/semi_supervised_2/form_triplets.py::MAX_SENTENCES_PER_MEANING`, `get_recommended_number_of_sentences`, final sampling loop; manuscript “Contrastive triplet construction” | Code targets 300 draws, ignores computed unique cap, and permits repeats; manuscript says at most 100 unique triplets. | Recover the actual experiment version/data. Resolve algorithm and manuscript together; do not change only the numeric constant. |
 | **critical** | `services/word_sense_detector.py::run`; `PredictionStrategy.max_sim_across_all_examples`; `services/utils_results.py::prediction_accuracy` | Evaluation aggregates dictionary examples into one sense-row prediction and excludes null rows; manuscript describes contextual-example WSD. | Confirm which protocol produced each result; recover/export per-context predictions and coverage if that is the reported unit. |
@@ -676,3 +700,7 @@ This audit inspected all Python modules, configuration files, notebook sources/m
 - Explicitly requested hidden states in demo model loading, as required by its existing pooling utilities.
 
 No thresholds, margins, scientific seed values, triplet counts, stochastic transition logic, evaluation aggregation units, or reported results were changed. No expensive experiment was run. README/source/CLI checks and small isolated supporting-code checks do not establish model-training or paper-result reproducibility.
+
+### Official benchmark identification update
+
+The official expanded benchmark is `yuriilaba/ukrainian-homonym-dict` at revision `07d2cd2`; its immutable Parquet file and counts were verified. The manuscript now uses the corrected count of 1,464 lemmas. The dataset card is maintained in `docs/huggingface/README.md` for publication as the Hugging Face repository's root `README.md`. This resolves the missing public processed-snapshot location, without claiming that the legacy raw loader or all original runs have been reconciled. No data, training parameters, or evaluation behavior were changed in this documentation update.
